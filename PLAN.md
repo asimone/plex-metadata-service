@@ -9,8 +9,8 @@ Two Plex **Custom Metadata Providers** that Plex calls itself: one for TV, one f
 ## 1. How it fits into Plex
 
 ```
-Agent "Movies (Simone)"                     Agent "TV (Simone)"
-  1. Simone Movies  /movie  PRIMARY           1. Simone TV  /tv  PRIMARY
+Agent "TMDB Movies"                     Agent "TVDB TV Shows"
+  1. TMDB Movies   /movie  PRIMARY           1. TVDB TV Shows  /tv  PRIMARY
   2. Plex Movie             fills the rest    2. Plex Series      fills the rest
   3. Plex Local Media (optional)              3. Plex Local Media (optional)
 ```
@@ -18,7 +18,7 @@ Agent "Movies (Simone)"                     Agent "TV (Simone)"
 - **Primary** means Plex sends us the **match** request for every new item and for Fix Match, and stores our GUID as the item's identity.
 - On every refresh, Plex asks each provider for metadata. Per field, the highest provider that supplies a value wins.
 - We return **what we're authoritative for**: identity, titles, dates, the hierarchy (TV), external IDs and **summaries**. We leave out artwork, cast, ratings and genres, so Plex Movie/Series fill them.
-- Plex calls us over the LAN, so the service runs all the time, in Docker on Tufte.
+- Plex calls us over the LAN, so the service runs all the time, in Docker on a host on the LAN.
 
 ## 2. Fixed decisions (ask before changing)
 
@@ -61,9 +61,9 @@ Everything else (art, cast, ratings, genres, content rating, studio, duration) i
 - Log one line per request: path, ratingKey or title, and result.
 - **Done when:** contract tests pass (required fields, GUID format, 400/404), and "Back to the Future" (1985) plus `imdb://tt0088763` both match `tmdb-movie-105`.
 
-### Phase 5: Docker on Tufte and a Plex test library ✅ (movies; real library switching 2026-10-20)
-- A multi-stage Dockerfile (`node:22-slim`, non-root) with `HEALTHCHECK /health`, and compose for Tufte (port 3000, `/data` volume, env file, `restart: unless-stopped`).
-- Register `http://<tufte-ip>:3000/movie` in Plex and create a "Movies (Simone)" agent as described in section 1. Point a **test Movie library** at the same folders.
+### Phase 5: Docker deployment and a Plex test library ✅
+- A multi-stage Dockerfile (`node:22-slim`, non-root) with `HEALTHCHECK /health`, and compose (port 3000, `/data` volume, env file, `restart: unless-stopped`).
+- Register `http://<docker-host-ip>:3000/movie` in Plex and create a "TMDB Movies" agent as described in section 1. Point a **test Movie library** at the same folders.
 - Record in `docs/PLEX-FINDINGS.md`:
   - which match hints Plex sends;
   - match accuracy on a sample;
