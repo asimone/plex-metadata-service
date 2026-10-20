@@ -50,7 +50,7 @@ Results from running the read-only Phase 1 dry run against the real server. Thes
 To list the legacy-agent or unmatched items yourself:
 
 ```bash
-npm run cli -- sync --dry-run --library "TV Shows" | grep "no external IDs"
+npm run cli -- list --library "TV Shows" | grep "no external IDs"
 ```
 
 ## Run 2 — 2026-10-20 (Phase 2, movies)
