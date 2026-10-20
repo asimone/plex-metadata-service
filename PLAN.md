@@ -1,289 +1,235 @@
-# Plex Custom Metadata Provider — Build Plan (rev. 3)
+# Plex Summary Provider — Build Plan (rev. 4)
 
-Hand-off plan for Claude Code. Build a self-hosted Plex **Custom Metadata Provider** where each field (summary, ratings and so on) has its own source priority, so no single upstream controls the summary text: not Plex's aggregator, not IMDb, not anyone else.
+Hand-off plan for Claude Code. Build a small, self-hosted Plex **Custom Metadata Provider** whose only job is to supply **human-written summaries**. Plex's own agents supply everything else.
 
-**v1 is movies only.** TV comes in v2, built on TVDB (see section 13). Until then, TV libraries stay on Plex Series.
-
-Work through the phases in order. Each phase ends with passing tests and a commit. Don't start a phase until the previous one meets its acceptance criteria.
-
-**Changes from rev. 1:**
-- v1 is movies only; TV moves to v2 on TVDB.
-- A CLI plus logging replaces the admin web page.
-- Overrides live in one YAML file.
-- There's a new "leverage Plex" principle.
-- Ratings are additive (each source contributes its own badge), and Metacritic is dropped.
-- The example code is copied in rather than forked.
+**What changed from rev. 3:** Plex's new agent system already stacks providers and fills each missing field from the next provider down. So this project no longer rebuilds a full metadata agent. Plex Movie / Plex Series keep doing posters, cast, ratings, collections and Discovery. This provider only replaces the field that's broken: the AI-rewritten descriptions.
+- Dropped as a result: OMDb (Plex Movie already shows IMDb and Rotten Tomatoes ratings), the images endpoint, cast and ratings mapping, the per-field merge engine, and the multi-source fallback chains.
 
 ---
 
-## 1. Context
+## 1. Problem and approach
 
-**Problem.** Plex's built-in agents (Plex Series / Plex Movie) now serve low-quality, AI-rewritten summaries. The legacy single-source agents (TheTVDB, TMDB) are hidden as of PMS 1.43 and are being retired. Plex's supported replacement is the Custom Metadata Provider API (PMS 1.43.0+): an external HTTP service that Plex calls for matching and metadata.
+**Problem.** Plex Movie and Plex Series serve AI-rewritten, low-quality summaries. Their other metadata (matching, artwork, cast, ratings, collections) is fine.
 
-**Starting point.** Plex's reference implementation, [`plexinc/tmdb-example-provider`](https://github.com/plexinc/tmdb-example-provider) (TypeScript, Express 5, axios, winston, jest). It is a TV-only demo against TMDB. Its routes, paging, response models and TMDB client carry over. Its TMDB **TV** code is removed, because TV will be built on TVDB in v2.
+**How Plex agents work now** (PMS 1.43+, per Plex's announcement and staff replies; see section 9 for sources):
+- A **provider** is an HTTP service. An **agent** is an ordered list of providers that the user builds in Plex Settings → Metadata Agents.
+- One provider in the agent is **primary** and does the matching. Plex then sends a `match` request to each other provider and stores the GUID each one returns. Later refreshes are plain `metadata` GETs.
+- **Order sets priority.** Plex takes each field from the highest provider that supplies it, and lower providers fill whatever is left.
+- The legacy agent system is being removed from new PMS releases in 2026.
 
-**Environment.**
-- Plex Media Server 1.43.4 runs in Docker on host **Tasha** (Ubuntu 24.04).
-- This provider runs in Docker on host **Tufte** (Debian, the primary Docker host).
-- Tasha must be able to reach Tufte over the LAN. The service is **not** exposed through cloudflared or Nginx Proxy Manager.
+**Approach.** Build a provider that returns only the required core fields plus `summary` and a `Guid` array of external IDs. Make it the **primary** provider of an agent, with Plex Movie / Plex Series below it. Our provider matches, our summary wins, and Plex fills the rest.
 
-**Read first.** Before writing code, read `docs/MediaProvider.md`, `docs/Metadata.md` and `docs/API Endpoints.md` in the example repo. They are the spec. Where this plan and the spec disagree, the spec wins; flag the conflict.
+```
+Agent "Movies (clean summaries)"
+  1. Simone Summaries (this service)   PRIMARY: matching + summary
+  2. Plex Movie                        everything else
+  3. Plex Local Media (optional)       local artwork/assets
+```
+
+**Sources for summary text.** These have human-written, community-edited synopses:
+- **Movies:** TMDB.
+- **TV (v2):** TVDB first, then TMDB.
+- **Overrides** in a local YAML file always win.
+
+If no source has a summary, the provider **omits** the field and Plex fills it from its own agent. An imperfect summary beats a blank one; to blank a specific title instead, use an override.
 
 ---
 
 ## 2. Principle: leverage Plex
 
-Don't rebuild what Plex already does. Before adding a feature, check whether a Plex feature covers it.
+Don't rebuild what Plex already does.
 
-| Need | Use Plex | The provider's role |
-|---|---|---|
-| Fix one item's summary or title | Edit in Plex. Plex locks the field and refreshes won't overwrite it | None |
-| Pick a different poster or background | Plex's artwork picker | Serve every available image through `/images` so Plex has choices |
-| Fix a wrong match | Plex's **Fix Match** | Return good ranked results for `manual=1` |
-| Local posters, local metadata | Plex's local assets | None |
-| Collections | Plex collections and smart collections | None |
-| Apply changes | Plex **Refresh Metadata** | None. Provider changes take effect on the next refresh |
+| Need | Who does it |
+|---|---|
+| Matching, Fix Match results | **This provider** (it is primary; section 4) |
+| Posters, backgrounds, artwork picker | Plex Movie / Series, Plex Local Media |
+| Cast, crew, Discovery pages | Plex Movie / Series |
+| IMDb / Rotten Tomatoes / TMDB ratings | Plex Movie / Series |
+| Collections | Plex |
+| One-off summary fix | Edit in Plex. Plex locks the field |
+| **Summaries that persist and stay fixed** | **This provider** |
 
-Provider-side overrides exist only for what Plex locks can't do: **pinning a source** (the text stays current instead of frozen), **surviving a rematch or library rebuild** (Plex locks don't), and applying to every library that uses the provider. The README says so.
+Provider overrides (section 6) exist only for what Plex field locks can't do: survive a rematch or library rebuild, and apply to every library that uses the provider.
 
 ---
 
 ## 3. Scope
 
-### In scope (v1)
-- **Movie provider** (type 1).
-- Sources:
-  - **TMDB**: structure, images, cast, summaries.
-  - **OMDb**: IMDb and Rotten Tomatoes ratings, and a fallback plot.
-  - **Overrides**: a YAML file.
-- Per-field merge policy in a config file.
-- SQLite cache, retries, circuit breaker, graceful fallback.
-- **CLI** to compare sources and manage overrides, plus clear logging. **No web UI.**
+### v1: movies
+- Movie summary provider at `/movie` (type 1), with TMDB as the source.
+- Overrides in `config/overrides.yaml`, plus a small CLI.
+- SQLite cache, retry and timeouts.
+- Logging that shows which source supplied each summary.
 - Docker image and compose file for Tufte.
 
-### v2 (planned; see section 13)
-- **TV provider on TVDB** (show / season / episode), with alternate episode orders.
+### v2: TV
+- TV summary provider at `/tv` (types 2, 3, 4), with TVDB first and TMDB as fallback. Section 8 has the details.
 
-### Out of scope. Design so these can be added later without a rewrite.
-- TVmaze as an extra summary source.
-- IMDb bulk datasets for ratings.
-- Anime-specific handling (AniList, MAL, AniDB, Anime-Lists mapping).
-- NFO files as a source.
-- Collections (type 18). Plex handles these natively.
-- Sonarr/Radarr integration. The service never talks to the *arr stack.
-- Any admin web page.
+### Out of scope
+- Images, cast, ratings, genres, collections and every field other than `summary` (and `tagline`, if testing shows Plex's taglines are also rewritten).
+- OMDb and IMDb plots (IMDb is a suspected source of the rewritten text).
+- An admin web UI.
+- Anime, NFO, and *arr integration.
 
 ---
 
-## 4. Spec facts to honor
+## 4. Decided: this provider is primary
 
-From the example repo's docs (movie-relevant subset; section 13 covers TV):
+This provider is the agent's **primary**, and Plex Movie / Plex Series sit below it to fill the gaps.
+
+**What that means:**
+- **Matching is ours.** Plex sends the initial match and Fix Match (`manual=1`) to this provider. Match quality matters for everything, not just summaries, so Phase 1 puts real care into it: ID hints first, filename tags (`{tmdb-…}`, `{imdb-…}`), then title + year with good ranking.
+- **Item GUIDs become ours** (`tv.plex.agents.custom.simone.movie://movie/tmdb-movie-{id}`). Switching a library to this agent rematches every item; Phase 2 confirms watch state survives.
+- **Plex Movie matches separately.** Plex sends it its own match request (title, year, filename today; staff plan to add known external GUIDs). If it lands on a different movie than we did, the item gets mixed metadata, e.g. our summary with someone else's poster. Our `Guid` array (imdb/tmdb) is our best defense, and Phase 2 measures how often this happens.
+
+**Known Plex issues to check in Phase 2:**
+- A forum report (1.43.0) says some fields, `audienceRating` among them, don't fall back from a secondary Plex provider. Staff called it a known issue with no ETA. If the IMDb/RT badges go missing, the fix is to supply `Rating` ourselves (OMDb comes back in scope only for that).
+- Another report (1.43.2) says Plex Series as a secondary provider didn't fetch season and episode titles or descriptions. That matters for v2 TV (section 8).
+- An omitted field should fall through to lower providers. It's unconfirmed whether an empty string does too, so the provider must **omit**, never send `""`.
+
+---
+
+## 5. Spec facts to honor
+
+From `docs/` (Plex's provider spec):
 
 | Item | Rule |
 |---|---|
-| Provider identifier | Must start with `tv.plex.agents.custom.`. Suffix characters are limited to `[a-zA-Z0-9.]` |
-| Separate providers | One provider per parent type. Movies get their own provider at `/movie` |
-| Metadata type numbers | movie = 1 (show = 2, season = 3, episode = 4 for v2) |
-| GUID format | `{scheme}://{type}/{ratingKey}`. The scheme equals the provider identifier |
-| ratingKey chars | `[a-zA-Z0-9_-]` only |
+| Identifier | `tv.plex.agents.custom.` prefix, suffix limited to `[a-zA-Z0-9.]` |
+| Required Metadata fields | `ratingKey`, `key`, `guid`, `type`, `title`, `originallyAvailableAt` |
+| GUID | `{identifier}://{type}/{ratingKey}`; ratingKey limited to `[a-zA-Z0-9_-]` |
 | Required features | `metadata` (GET) and `match` (POST) |
-| Recommended | `/library/metadata/:ratingKey/images` |
-| `manual=1` on match | Return multiple results ordered by confidence. Otherwise return the best match only |
-| `includeAdult` | Filter out adult results unless `1` |
-| Localization | `X-Plex-Language` and `X-Plex-Country`, as header or query param |
-| Status codes | 200 OK, 400 malformed, 404 unknown ratingKey (metadata only), 500 internal |
-| External IDs | Include a `Guid` array (`imdb://`, `tmdb://`) on items |
-| Rating badges | Only `imdb://image.rating`, `themoviedb://image.rating`, `rottentomatoes://image.rating.ripe` (critic), `rottentomatoes://image.rating.upright` (audience). Values are floats from 0 to 10. New badge types are not supported |
+| `manual=1` | Ranked list; otherwise the best match only |
+| Status codes | 200, 400 malformed, 404 unknown ratingKey (metadata only), 500 internal |
+| Localization | `X-Plex-Language` / `X-Plex-Country`, as header or query |
+| External IDs | `Guid` array (`imdb://`, `tmdb://`, `tvdb://`) |
+| Plex request timeout | About 90 s per staff (we target well under 8 s) |
+| Match hints from Plex | title, year, filename and relative path today. Staff plan to also pass known external GUIDs; use them when present |
+
+`/images`, `/children` and `/grandchildren` are recommended or required only for providers that serve those fields. v1 movies doesn't need them. v2 TV needs `/children` and `/grandchildren` (section 8).
 
 ---
 
-## 5. Fixed decisions
+## 6. Fixed decisions
 
-These are hard to change later. Do not deviate without asking.
+Ask before changing any of these.
 
-**Identifiers (permanent).** Changing these forces Plex to rematch every item.
-- Movie: `tv.plex.agents.custom.simone.movie`
-- TV (reserved for v2): `tv.plex.agents.custom.simone.tv`
+- **Identifiers (permanent):** movie `tv.plex.agents.custom.simone.movie`; TV (v2) `tv.plex.agents.custom.simone.tv`.
+- **ratingKeys (permanent):** movie `tmdb-movie-{id}`. TV keys are in section 8.
+- **Response contents:** required core fields, `year`, `Guid` array, `summary` (when available). Nothing else unless Phase 2 shows a reason.
+- **Summary resolution:** `override` → configured sources in order → omit. Config file `config/sources.yaml`:
 
-**ratingKeys (permanent).**
-- Movie: `tmdb-movie-{id}`, e.g. `tmdb-movie-105`.
-- The TV formats are fixed now, in section 13, even though TV ships in v2.
-
-**Paths.** `/movie/...` exposes `GET /` (the provider definition), `/library/metadata/...` and `/library/metadata/matches`. `/tv` is reserved for v2 and not mounted in v1.
-
-**Runtime.** Node 22, TypeScript strict. Production runs compiled JS (`node dist/server.js`), not ts-node.
-
-**Housekeeping.**
-- This repo is not a GitHub fork. Copy the example's code in as the first code commit and credit the source (commit hash and URL) in the commit message and README. The example has no LICENSE file; its `package.json` declares ISC, which is compatible with this repo's MIT license.
-- Remove the unused `@anthropic-ai/claude-agent-sdk` dependency.
-- Remove the example's TMDB TV code once the movie provider is in (Phase 2). Keep anything generic (paging, `Children` helpers, models) for v2.
-- Keep Swagger at `/api-docs`, behind `ENABLE_API_DOCS` (default `true`).
-- Never commit `.env` or the SQLite database.
-
----
-
-## 6. Target architecture
-
-```
-Plex (Tasha) ──HTTP──▶ Provider service (Tufte)
-                         ├─ /movie  Movie provider (type 1)   backbone: TMDB
-                         ├─ Match layer    ID first (guid hint), title+year fallback
-                         ├─ Merge layer    per-field source priority, overrides win
-                         ├─ Source adapters
-                         │    ├─ tmdb      (structure, images, cast, summary)
-                         │    ├─ omdb      (IMDb/RT ratings + fallback plot, budgeted)
-                         │    └─ override  (config/overrides.yaml, always wins)
-                         ├─ Cache          SQLite, per-source TTL
-                         └─ CLI            compare sources, manage overrides
-```
-
-The source adapters, merge engine, cache and CLI must not assume movies. v2 adds a TV provider and a `tvdb` adapter without changes to these layers.
-
-### Proposed layout
-
-```
-src/
-  app.ts, server.ts, cli.ts
-  config/            env.ts, sources.ts (merge policy YAML)
-  providers/         MovieProvider.ts
-  routes/            movieRoutes.ts, shared/ (paging, headers, errors)
-  sources/
-    SourceAdapter.ts        interface
-    tmdb/                   TMDBClient.ts (from example), TMDBMapper.ts
-    omdb/                   OMDbClient.ts, OMDbMapper.ts
-    override/               OverrideStore.ts (YAML, hot reload)
-  merge/             MergeEngine.ts, policy.ts
-  services/          MovieMatchService.ts, MovieMetadataService.ts
-  cache/             Cache.ts (SQLite), budget.ts (OMDb daily counter), servedItems.ts
-  resilience/        retry.ts, circuitBreaker.ts
-  text/              cleanSummary.ts
-  models/            Metadata.ts, MediaProvider.ts (from example)
-  utils/             guid.ts, logger.ts
-config/
-  sources.example.yaml, overrides.example.yaml
-test/
-  unit/, contract/, fixtures/
-```
-
----
-
-## 7. Merge policy
-
-Each field resolves through an ordered list of sources. The first source that returns a non-empty, valid value wins. `override` is always checked first, even if a list omits it.
-
-`config/sources.yaml` (ship `sources.example.yaml`):
-
-```yaml
-movie:
-  summary:        [override, tmdb, omdb]
-  title:          [override, tmdb]
-  tagline:        [tmdb]
-  images:         [tmdb]
-  cast:           [tmdb]
-  genres:         [tmdb]
-  contentRating:  [tmdb]
-  ratings:        [omdb, tmdb]      # additive, see below
-```
-
-The file is keyed by provider type, so v2 adds a `tv:` block.
-
-**Why OMDb is last for summaries.** OMDb's plot comes from IMDb, one of the suspected sources of the AI-rewritten text. It is a fallback, or something to pin per title.
-
-**Ratings are additive, not first-wins.** The `Rating` array collects one entry per badge from every available source, in list order, without duplicates:
-- IMDb: OMDb `imdbRating` → `imdb://image.rating`, `audience`.
-- Rotten Tomatoes: OMDb `Ratings[Source="Rotten Tomatoes"]`, e.g. `87%` → `8.7`, `rottentomatoes://image.rating.ripe`, `critic`. Show it regardless of score. Plex has no "rotten" badge; note this in the README.
-- TMDB: `vote_average` → `themoviedb://image.rating`, `audience`.
-- Metacritic: dropped, since Plex has no badge for it.
-
-**Rules.**
-- Structure is never merged: ratingKeys, dates, duration and external IDs always come from TMDB.
-- Cross-source lookups go by ID only (TMDB `external_ids` → IMDb ID). Never title-search a secondary source.
-- A source failure (timeout, open circuit, exhausted budget, 4xx/5xx) means "no value"; move to the next source. Never return 500 when TMDB data is available.
-
----
-
-## 8. Sources
-
-### TMDB (backbone)
-- Reuse the example's client. Add movie endpoints (`/movie/{id}` with `append_to_response=credits,images,release_dates,external_ids`).
-- Matching: `tmdb://` hint by direct lookup, `imdb://` via `/find`, otherwise `/search/movie` with title and year.
-- Handle HTTP 429 using `Retry-After`. Keep request logging under the existing env toggle.
-
-### OMDb (ratings and fallback plot)
-- Endpoint: `https://www.omdbapi.com/?apikey=...&i={imdbId}&plot=full`.
-- Look up by IMDb ID only. Never title-search.
-- **Budget:** keep a daily counter in SQLite with a configurable cap (`OMDB_DAILY_CAP`, default 900 for the free tier; raise it for paid tiers). At the cap, fall through to the next source. Reset at UTC midnight.
-- Cache responses for 30 days and "not found" (`Response: "False"`) for 7 days.
-- Optional. If `OMDB_API_KEY` is unset, the adapter is disabled and the service still works.
-
-### Overrides (`config/overrides.yaml`)
-- **The only override store.** It is edited by hand or through the CLI.
-- Keyed by provider type and ratingKey, then field. Each value is either literal text or a pin:
+  ```yaml
+  movie:
+    summary: [tmdb]
+  tv:                   # v2
+    summary: [tvdb, tmdb]
+  ```
+- **Cleanup** on all summary text: strip HTML and decode entities, strip trailing attributions like `(Source: …)` / `[Written by …]`, collapse whitespace; `N/A`, empty or whitespace-only means no value.
+- **Overrides (`config/overrides.yaml`)** are the only override store, edited by hand or through the CLI. They hot reload, and a bad file keeps the last good version and logs the error with its line number. A value is either literal text or a pin to a source:
 
   ```yaml
   movie:
     tmdb-movie-105:
-      summary: { pin: omdb }
+      summary: "Marty McFly, a 17-year-old..."
     tmdb-movie-603:
-      summary: "A hacker learns..."
+      summary: { pin: tmdb }
   ```
-- **Hot reload:** watch the file and apply changes without a restart. On a parse or validation error, log it with the line number and keep the last good version.
-- **Validation:** known provider types, a well-formed ratingKey for that type, known fields, known sources in pins.
-- CLI edits use the `yaml` library's Document API so comments and ordering survive.
-- Changes take effect on Plex's next refresh of that item.
-
-### Summary cleanup (applied to every source's text)
-- Strip HTML tags and decode entities.
-- Strip trailing attributions like `(Source: Crunchyroll)` and `[Written by MAL Rewrite]`.
-- Collapse whitespace. Treat `"N/A"`, empty and whitespace-only strings as no value.
+  Overrides are keyed by **our** ratingKey, which is the item's GUID in Plex because this provider is primary.
+- **Runtime:** Node 22, TypeScript strict, production runs `node dist/server.js`.
+- **Housekeeping:** remove the example's TMDB TV code in Phase 1 (v2 rebuilds TV on TVDB). Keep Swagger behind `ENABLE_API_DOCS`. Never commit `.env` or the database.
 
 ---
 
-## 9. Cache and resilience
+## 7. v1 phases
 
-- SQLite via `better-sqlite3`, file at `/data/provider.db`, WAL mode.
-- Cache key: source + endpoint + params + language.
-- TTLs (configurable): TMDB metadata 7 days, TMDB search 1 day, OMDb 30 days, OMDb not-found 7 days.
-- `served_items` table: provider type, ratingKey, title, year, last served. It powers `cli search` and survives cache expiry.
-- Retries: up to 3, with exponential backoff and jitter, only for network errors, 429 and 5xx.
-- One circuit breaker per source: opens after 5 consecutive failures, goes half-open after 60 seconds.
-- Outbound timeout: 8 seconds per request.
-- `GET /health` returns status, uptime, cache size, per-source circuit state and the OMDb budget used today. It must stay fast and never call upstreams.
+### Phase 0: Baseline ✅
+Example imported with attribution, unused dependency removed, `start:prod` added. Tests and build pass. (Branch `phase-0-baseline`.)
 
----
+### Phase 1: Minimal movie summary provider
+- `GET /movie`: provider definition (type 1 only).
+- `POST /movie/library/metadata/matches`:
+  - Use a `tmdb://` or `imdb://` hint when Plex sends one (`/movie/{id}`, `/find`).
+  - Otherwise use title + year (`/search/movie`). Use `filename` to pull out the year or `{tmdb-…}` / `{imdb-…}` tags when no year is given.
+  - `manual=1` returns up to 10 ranked results. Respect `includeAdult`.
+- `GET /movie/library/metadata/:ratingKey`: required fields, `year`, `Guid` array, `summary`. Pick the summary language from `X-Plex-Language`, falling back to English.
+- `cleanSummary`, plus overrides read from YAML (CLI comes in Phase 4).
+- Log at `info`: one line per request with ratingKey, title and summary source (`override` / `tmdb` / `none`). Log full match bodies at `debug`.
+- Remove the example's TV routes and mapping; unmount `/tv`.
+- **Done when:** contract tests pass for match and metadata (required fields, GUID format, 400/404), a summary is omitted rather than empty when there's none, and "Back to the Future" (1985) plus `imdb://tt0088763` both match TMDB 105.
 
-## 10. CLI and logging
+### Phase 2: Docker, deploy, and the Plex test
+- Multi-stage Dockerfile (`node:22-slim`, non-root), `HEALTHCHECK` on `/health`, compose for Tufte (`container_name: plex-provider`, `restart: unless-stopped`, `/data` and `/config` volumes, env file).
+- Register the provider in Plex on Tasha and create a **test Movie library** on the same folders. Then answer, and record in `docs/PLEX-FINDINGS.md`:
+  1. With this provider as primary supplying only `summary`, do posters, cast, ratings (IMDb/RT badges), genres and collections all fill from Plex Movie?
+  2. How often does Plex Movie match a different movie than we did? Compare on a sample, including remakes and same-title movies.
+  3. Which match hints does Plex send to this provider (GUIDs? filename? year?).
+  4. Does watch state survive switching the library onto this agent?
+  5. Does a refresh pick up a changed override?
+  6. Are Plex's taglines also rewritten? If so, add `tagline` to scope.
+  7. The exact provider URL to register (`/movie` vs root).
+- **Done when:** the container runs on Tufte, `/health` is green from Tasha's Plex container, and the findings doc answers all seven questions. **If gap-filling from Plex Movie doesn't work, stop and revisit this plan.**
 
-There is no web UI. Run the CLI inside the container: `docker exec plex-provider node dist/cli.js <command>`.
+### Phase 3: Cache and resilience
+- SQLite (`better-sqlite3`, WAL) at `/data/provider.db`. Cache key: source + endpoint + params + language. TTLs: TMDB metadata 7 days, search 1 day.
+- `served_items` table (ratingKey, title, year, last served) for CLI search.
+- Retry up to 3 times with backoff and jitter on network errors, 429 (honor `Retry-After`) and 5xx. 8 s outbound timeout. One circuit breaker per source (5 failures to open, half-open after 60 s).
+- On any source failure, omit `summary` and let Plex fill it. Return 500 only when the request can't be answered at all.
+- `/health`: status, uptime, cache size, circuit states. Never calls upstreams.
+- **Done when:** unit tests cover cache hit/miss/expiry, retry rules and breaker states, and a repeat metadata request makes zero upstream calls.
+
+### Phase 4: CLI
+Run with `docker exec plex-provider node dist/cli.js <cmd>`. Uses Node's `util.parseArgs`, with no CLI framework.
 
 | Command | Does |
 |---|---|
-| `search <title>` | Find items Plex has requested (from `served_items`) |
-| `compare <ratingKey>` | Print every source's value for each overridable field, the winner, and the final text Plex receives |
-| `pin <ratingKey> <field> <source>` | Pin a source for the field |
-| `set <ratingKey> <field> "<text>"` | Write a literal override |
-| `clear <ratingKey> [field]` | Remove the overrides for the item, or for one field |
-| `overrides validate` | Validate `overrides.yaml` without the server running |
-| `health` | Print `/health` |
+| `search <title>` | Find served items |
+| `show <ratingKey>` | Each source's summary, the winner, and the final text |
+| `set <ratingKey> "<text>"` | Literal summary override |
+| `pin <ratingKey> <source>` | Pin a source |
+| `clear <ratingKey>` | Remove the override |
+| `overrides validate` | Check the YAML |
 
-`compare` fetches live, through the cache, so it shows what Plex would get right now. After changing an override, the CLI reminds you to refresh the item in Plex.
+Edits go through the `yaml` library's Document API so comments survive. The CLI reminds you to refresh the item in Plex.
+- **Done when:** `set` / `pin` / `clear` change and revert the metadata endpoint's summary, and a hand edit to the YAML applies without a restart.
 
-**Logging** (winston, JSON in production, readable in dev):
-- `info`, one line per metadata or match request: provider, ratingKey, title, the winning source per field (e.g. `summary=tmdb ratings=omdb,tmdb`), cache hits vs upstream calls, duration.
-- `warn`: a source failed and fell through, a circuit opened, the OMDb budget is exhausted, an overrides file was rejected.
-- `debug`: full match request bodies (to answer the open questions in section 14) and upstream URLs (secrets redacted).
-- Readable with `docker logs -f plex-provider` or Dozzle.
+### Phase 5: Tests, docs and rollout
+- Offline test suite (`nock`). `npm run smoke` hits the live API for a few movies. Coverage of at least 80% on `sources/`, `cache/`, `resilience/` and `overrides/`.
+- README: what it is and isn't, agent setup (a step-by-step walkthrough: this provider as primary, Plex Movie below), env vars, CLI, troubleshooting, the Phase 2 findings, and credits.
+- **Rollout:** reserve Tufte's IP in pfSense → deploy → test library → compare a sample of titles → switch the real Movie library's agent → refresh → delete the test library. **Rollback:** switch the library back to Plex Movie and refresh.
 
 ---
 
-## 11. Configuration
+## 8. v2: TV (outline)
 
-`.env.example`:
+Built after v1 is live and the Phase 2 findings are known.
+
+- **This provider is primary for TV too**, so it must serve the full hierarchy on **TVDB**: show, seasons and episodes, `/children` and `/grandchildren` with paging, `includeChildren`, and episode match by `parentIndex`/`index` or `date`. Responses stay minimal (required fields, titles, indexes, dates, `Guid`, `summary`); Plex Series fills art, cast and ratings.
+- TVDB numbering matches Sonarr's file naming, so episode matching lines up with your files.
+- **Check first:** the 1.43.2 report that Plex Series as a secondary doesn't fetch season and episode details. Since we supply episode titles and summaries ourselves, the impact may be limited to episode thumbnails. Test before building.
+- Alternate episode orders (DVD, absolute) are a later add-on, not part of v2's first cut.
+- **ratingKeys (permanent):** `tvdb-show-{seriesId}`, `tvdb-season-{seriesId}-{seasonType}-{n}`, `tvdb-episode-{episodeId}`.
+- **Needs:** a TVDB v4 API key (confirm whether a subscriber PIN or fee is required).
+- TMDB and other secondary sources are reached only by ID from TVDB, never by season and episode number.
+
+---
+
+## 9. Sources for the Plex behavior above
+
+- [Plex announcement: Custom Metadata Providers](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384) and [page 2](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384?page=2): staff explain the primary provider, priority order, gap-filling, and the 90 s timeout.
+- [Secondary provider fallback not working](https://forums.plex.tv/t/metadata-agent-secondary-provider-fallback-not-working/936181): `audienceRating` doesn't fall back (a known issue).
+- [Plex Series as secondary not fetching season/episode details](https://forums.plex.tv/t/plex-series-metadata-provider-not-fetching-season-episode-details-when-used-as-secondary-agent/939685).
+- [Plex support: Agents](https://support.plex.tv/articles/200241558-agents/): ordering and per-field fallback.
+- Some details come from community forum posts, not official docs. Phase 2 verifies them against the real server.
+
+---
+
+## 10. Configuration
+
+`.env`:
 
 ```
-TMDB_API_KEY=
-OMDB_API_KEY=            # optional
-OMDB_DAILY_CAP=900
+TMDB_API_KEY=            # v3 "API Key"
 PORT=3000
 BASE_URL=http://<tufte-ip>:3000
 DATA_DIR=/data
@@ -292,121 +238,17 @@ OVERRIDES_FILE=/config/overrides.yaml
 ENABLE_API_DOCS=true
 LOG_LEVEL=info
 LOG_UPSTREAM_REQUESTS=true
+# v2: TVDB_API_KEY=, TVDB_PIN=
 ```
 
-Validate at startup: `TMDB_API_KEY` is required. The sources YAML must parse and reference only known sources and fields. The overrides YAML is validated, but a bad file only warns. Fail fast on anything required, with a clear message.
+Startup validation: `TMDB_API_KEY` is required. `sources.yaml` must reference only known sources. A bad overrides file warns but doesn't stop startup.
 
 ---
 
-## 12. Phases (v1)
+## 11. Working rules for Claude Code
 
-### Phase 0: Baseline
-- Copy the example code in, with attribution. Install, build, and run the existing tests.
-- Remove the unused dependency. Add `npm run start:prod` → `node dist/server.js`.
-- **Done when:** `npm test` and `npm run build` pass on the imported code.
-
-### Phase 1: Movie provider (TMDB)
-- `MovieProvider.ts`: type 1 only, identifier `tv.plex.agents.custom.simone.movie`.
-- Routes: `GET /movie`, `GET /movie/library/metadata/:ratingKey`, `GET /movie/library/metadata/:ratingKey/images`, `POST /movie/library/metadata/matches`.
-- Matching per section 8. `manual=1` returns up to 10 ranked results; respect `includeAdult`.
-- Full movie mapping: summary, tagline, studio, genres, country, cast and crew, content rating by `X-Plex-Country`, TMDB rating, every image, `Guid` array, duration.
-- Move shared code (paging, header parsing, response wrapping, errors) into `routes/shared/`. Remove the example's TV routes and TMDB TV mapping, and unmount `/tv`.
-- **Done when:** movie contract tests pass, and a manual match for "Back to the Future" (1985) and for `imdb://tt0088763` both return TMDB 105.
-
-### Phase 2: Docker and deploy loop
-- Multi-stage Dockerfile on `node:22-slim`. The build stage compiles TS; the runtime stage has production deps only and runs as a non-root user.
-- `HEALTHCHECK` against `/health`. Volumes: `/data` (database) and `/config` (YAML).
-- `docker-compose.yml` for Tufte with `restart: unless-stopped`, port 3000, an env file, both volumes, and `container_name: plex-provider`.
-- **Done when:** the container builds and runs on Tufte, `/health` is green, and `/movie` returns the provider definition from inside another container on the same host.
-
-### Phase 3: Cache and resilience
-- Implement `Cache`, retry, circuit breaker, timeouts and `served_items`. Route all upstream calls through them.
-- Extend `/health`.
-- **Done when:** unit tests cover cache hit/miss/expiry, retry on 5xx and 429, no retry on 4xx, and breaker open/half-open/close; a second identical metadata request makes zero upstream calls.
-
-### Phase 4: Merge engine and OMDb
-- `SourceAdapter` interface: `getFields(item, fields, ctx) → Partial<FieldValues>`.
-- `MergeEngine` applies the YAML policy per field, with additive ratings.
-- OMDb client, mapper, budget, caching, and disable-when-no-key.
-- `cleanSummary` on all summary text.
-- **Done when:** unit tests prove priority order, fallthrough on failure and on empty values, the budget cutoff, rating conversion, and that output with OMDb disabled matches TMDB-only output.
-
-### Phase 5: Overrides, CLI and logging
-- `OverrideStore` (YAML, hot reload, validation), wired into the merge engine as the first source.
-- The CLI and logging per section 10.
-- **Done when:** `cli pin` / `cli set` changes the `summary` the metadata endpoint returns, `cli clear` reverts it, a hand edit to the YAML takes effect without a restart, and a broken YAML keeps the last good overrides.
-
-### Phase 6: Test hardening
-- Contract tests per endpoint against `docs/*.md`: required fields, GUID and ratingKey formats, the `Image` and `Rating` shapes, and the 400 and 404 cases.
-- Mock all HTTP in tests (`nock`); no live calls in `npm test`.
-- `npm run smoke` uses real keys against a few known movies and prints the merged results.
-- **Done when:** `npm test` passes offline, and coverage on `merge/`, `sources/`, `cache/` and `resilience/` is at least 80%.
-
-### Phase 7: Docs and rollout
-- README: what it is, setup, env vars, merge config, the "leverage Plex" guidance (when to use Plex field locks vs overrides), CLI, Plex registration, troubleshooting, credits to the example repo, the v2 roadmap.
-- `docs/ROLLOUT.md` with the procedure below.
-- **Done when:** a new reader can deploy it from the README alone.
-
-### Rollout procedure (for the README)
-1. Give Tufte a DHCP reservation or static IP in pfSense first. Plex registers the provider by address, and an IP change silently breaks metadata.
-2. Deploy with compose on Tufte. Confirm `curl http://<tufte-ip>:3000/movie` works **from Tasha**, including from inside the Plex container.
-3. In Plex: Settings → Metadata Agents → Add Provider → `http://<tufte-ip>:3000/movie`.
-4. Add an Agent, name it, and set the new provider as primary.
-5. Create a **test Movie library** pointing at the same media folders, using the new agent. Leave the real library untouched.
-6. Compare a sample of titles. Watch `docker logs -f plex-provider` during matching.
-7. Pin or override summaries with the CLI where needed. Overrides survive the switch to the real library; Plex field locks made in the test library do not.
-8. Once satisfied, switch the real Movie library's agent, refresh metadata, and delete the test library.
-
-**Rollback:** switch the library agent back to Plex Movie and refresh. Nothing in the media folders is modified.
-
----
-
-## 13. v2 roadmap: TV on TVDB
-
-Not built in v1. These decisions are recorded now so v1 doesn't paint v2 into a corner.
-
-**Why TVDB.** Sonarr names TV files using TVDB numbering, so a TVDB backbone matches episodes correctly where TMDB numbering differs (specials, split seasons, anime). TVDB also provides aired, DVD and absolute orders natively.
-
-**Fixed now (permanent once shipped):**
-- Identifier: `tv.plex.agents.custom.simone.tv`, at `/tv`.
-- ratingKeys:
-
-  | Type | Format | Example |
-  |---|---|---|
-  | Show | `tvdb-show-{seriesId}` | `tvdb-show-81189` |
-  | Season | `tvdb-season-{seriesId}-{seasonType}-{number}` | `tvdb-season-81189-official-2` |
-  | Episode | `tvdb-episode-{episodeId}` (TVDB's own episode ID) | `tvdb-episode-349232` |
-
-  - `seasonType` is TVDB's season-type slug (`official`, `dvd`, `absolute`, …), lowercased and limited to `[a-z0-9]`.
-  - Episodes are keyed by episode ID so watch history and overrides survive renumbering and order changes.
-  - With no `episodeOrder`, an episode's parent season is in `official` (aired) order.
-
-**Planned shape:**
-- Merge policy: `summary: [override, tvdb, tmdb, omdb]`, `ratings: [omdb, tmdb]`.
-- TMDB and OMDb are reached only through IDs from TVDB `remoteIds`. Per episode, they are used only when TVDB provides that episode's IMDb or TMDB ID; never fetch by season and episode number.
-- Spec requirements: types 2, 3 and 4; `/children` and `/grandchildren` paging (default size 20, start 1); `includeChildren`; `episodeOrder` with the `SeasonType` array; episode match by `date`.
-- Needs a TVDB v4 key, and possibly a subscriber PIN. Confirm the cost first.
-- Rollout: a test TV library first, and confirm watch state survives the rematch from Plex Series.
-
----
-
-## 14. Open questions to verify during the build
-
-Check these against real Plex behavior and note the findings in the README:
-
-- **Which hints Plex sends.** Log full match request bodies at `debug`. Confirm whether Plex includes `guid` hints such as `imdb://` for movies, and whether folder tags like `{tmdb-105}` / `{imdb-tt0088763}` arrive as `guid`.
-- **Ratings display.** Confirm that the section 4 badge identifiers render in Plex for movies.
-- **Exact provider URL Plex wants.** Confirm whether Plex is registered with the base (`/movie`) or the root URL, and adjust the README.
-- **Combining providers.** Plex lets an agent list multiple providers. Check whether this provider could sit as a secondary behind Plex's own for selective fields, in keeping with "leverage Plex". Record findings only; don't build it.
-
----
-
-## 15. Working rules for Claude Code
-
-- Keep each phase in its own branch or commit series. Run `npm test` and `npm run build` before each commit.
-- Prefer small, reviewable commits with clear messages.
-- Don't add dependencies without a reason noted in the commit message. Expected additions: `better-sqlite3`, `yaml`, `nock` (dev). The CLI uses Node's built-in `util.parseArgs`; no CLI framework.
-- Don't invent spec behavior. If the docs are silent, choose the simplest compliant option and note it.
-- Before building a feature, check whether Plex already does it (section 2).
-- Keep v1 simple: anything not needed for movies goes to section 13 or out of scope.
-- Ask before changing the identifiers, ratingKey formats, or merge semantics.
+- One branch per phase. Run `npm test` and `npm run build` before each commit; keep commits small.
+- New dependencies need a reason in the commit message. Expected: `better-sqlite3`, `yaml`, `nock` (dev).
+- Before building anything, ask whether Plex already does it (section 2). If the answer is "maybe", test it in Phase 2's test library first.
+- Don't invent spec behavior. Where the docs are silent, choose the simplest compliant option and note it.
+- Ask before changing identifiers, ratingKey formats, or summary resolution rules.
