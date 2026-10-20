@@ -12,7 +12,7 @@ import { idHints, rank, yearFromFilename } from '../match';
 import { POSTER_BASE, TmdbMovie, TmdbMovies } from './TmdbMovies';
 
 export const MOVIE_IDENTIFIER = 'tv.plex.agents.custom.simone.movie';
-export const MOVIE_TITLE = 'Simone Movies (TMDB, clean summaries)';
+export const MOVIE_TITLE = 'TMDB Movies';
 
 const RATING_KEY = /^tmdb-movie-(\d+)$/;
 

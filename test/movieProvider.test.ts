@@ -52,7 +52,7 @@ describe('GET /movie', () => {
     const res = await request(app()).get('/movie').expect(200);
     expect(res.body.MediaProvider).toEqual({
       identifier: ID,
-      title: expect.any(String),
+      title: 'TMDB Movies',
       version: expect.any(String),
       Types: [{ type: 1, Scheme: [{ scheme: ID }] }],
       Feature: [

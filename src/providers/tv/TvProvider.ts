@@ -14,7 +14,7 @@ import { idHints, rank, yearFromFilename } from '../match';
 import { Episode, Show, ShowSeason, TvdbSearchResult, TvdbShows } from './TvdbShows';
 
 export const TV_IDENTIFIER = 'tv.plex.agents.custom.simone.tv';
-export const TV_TITLE = 'Simone TV (TVDB, clean summaries)';
+export const TV_TITLE = 'TVDB TV Shows';
 
 export interface TvContext {
   /** Plex's language tag, e.g. "en-US". */
