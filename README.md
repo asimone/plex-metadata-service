@@ -2,7 +2,7 @@
 
 > **Origins:** this project started from Plex's official example provider, [plexinc/tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider), which is referenced in Plex's [Custom Metadata Providers announcement](https://forums.plex.tv/t/announcement-custom-metadata-providers/934384). Its provider spec documents are kept in [`docs/`](docs/).
 >
-> **Vibe coded with Claude:** this project was built with [Claude Code](https://claude.com/claude-code), with a human directing it.
+> **Vibe coded with Claude:** this project was built with [Claude Code](https://claude.com/claude-code), with a human professional tech product person directing it.
 
 Custom metadata providers for Plex (Plex Media Server 1.43+) that replace Plex's AI-rewritten summaries with human-written ones. Each provider is named after its source:
 
