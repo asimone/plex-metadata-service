@@ -19,3 +19,13 @@ coverage/
 # OS
 .DS_Store
 Thumbs.db
+
+# Local data (SQLite cache, budgets)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config (ship only the *.example.yaml files)
+config/*.yaml
+!config/*.example.yaml

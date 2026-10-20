@@ -1,20 +1,36 @@
 {
+  "name": "plex-metadata-service",
+  "version": "1.0.0",
+  "description": "Self-hosted Plex Custom Metadata Provider with per-field source priority",
+  "main": "dist/server.js",
+  "license": "MIT",
+  "author": "Andrew Simone",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "commonjs",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "start": "ts-node src/server.ts",
+    "dev": "ts-node src/server.ts",
+    "start:prod": "node dist/server.js"
+  },
+  "directories": {
+    "doc": "docs",
+    "test": "test"
+  },
+  "keywords": [],
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.9",
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "winston": "^3.18.3"
-  },
-  "name": "tmdb-example-provider",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs",
-    "test": "test"
   },
   "devDependencies": {
     "@types/dotenv": "^6.1.1",
@@ -30,18 +46,5 @@
     "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
-  },
-  "scripts": {
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
-    "build": "tsc",
-    "build:watch": "tsc --watch",
-    "start": "ts-node src/server.ts",
-    "dev": "ts-node src/server.ts"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs"
+  }
 }
