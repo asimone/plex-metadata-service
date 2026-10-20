@@ -102,6 +102,7 @@ describe('GET /tv', () => {
   it('declares shows, seasons and episodes', async () => {
     const res = await request(app()).get('/tv').expect(200);
     expect(res.body.MediaProvider.identifier).toBe(ID);
+    expect(res.body.MediaProvider.title).toBe('TVDB TV Shows');
     expect(res.body.MediaProvider.Types.map((t: { type: number }) => t.type)).toEqual([2, 3, 4]);
   });
 });
