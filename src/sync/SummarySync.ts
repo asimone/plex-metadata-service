@@ -5,22 +5,11 @@
 import { PlexClient } from '../plex/PlexClient';
 import { ITEM_TYPES_BY_LIBRARY, PlexItem, PlexItemType, PlexSection } from '../plex/types';
 import { SourceLookup, SourceName, SummarySource } from '../sources/SummarySource';
+import { Resolution, SOURCE_ORDER, Winner, resolveSummary } from '../sources/resolve';
 import { ItemRecord, Store } from '../store/Store';
 import logger from '../utils/logger';
-import { Action, Decision, Winner, decide } from './decide';
+import { Action, Decision, decide } from './decide';
 
-/** Source priority per item type. */
-export const SOURCE_ORDER: Record<PlexItemType, SourceName[]> = {
-  movie: ['tmdb', 'omdb'],
-  show: ['tvdb', 'tmdb'],
-  season: ['tvdb', 'tmdb'],
-  episode: ['tvdb', 'tmdb'],
-};
-
-export interface Resolution {
-  winner?: Winner;
-  lookups: Array<{ source: SourceName; lookup: SourceLookup }>;
-}
 
 export interface Outcome extends Decision {
   item: PlexItem;
@@ -64,22 +53,8 @@ export class SummarySync {
   }
 
   /** Asks each configured source in priority order; the first summary wins. */
-  async resolve(item: PlexItem, all = false): Promise<Resolution> {
-    const resolution: Resolution = { lookups: [] };
-    for (const name of SOURCE_ORDER[item.type]) {
-      const source = this.sources.get(name);
-      if (!source) continue;
-      const lookup = await source.getSummary(item);
-      resolution.lookups.push({ source: name, lookup });
-      if (lookup.status === 'unavailable') {
-        logger.warn(`${item.title}: ${lookup.reason}`);
-      }
-      if (lookup.status === 'found' && !resolution.winner) {
-        resolution.winner = { source: name, summary: lookup.summary, externalId: lookup.externalId };
-        if (!all) break;
-      }
-    }
-    return resolution;
+  resolve(item: PlexItem, all = false): Promise<Resolution> {
+    return resolveSummary(this.sources, item, all);
   }
 
   /** Syncs every supported item in the given libraries. */

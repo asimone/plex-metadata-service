@@ -3,14 +3,11 @@
  */
 
 import { PlexItem } from '../plex/types';
+import { Winner } from '../sources/resolve';
 import { ItemRecord } from '../store/Store';
 import { sameSummary } from '../text/cleanSummary';
 
-export interface Winner {
-  source: string;
-  summary: string;
-  externalId: string;
-}
+export type { Winner };
 
 export type Action =
   /** Write our summary and lock it. */

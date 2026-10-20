@@ -1,8 +1,8 @@
 {
   "name": "plex-summary-sync",
   "version": "1.0.0",
-  "description": "Replaces Plex AI-rewritten summaries with human-written ones from TVDB, TMDB and OMDb",
-  "main": "dist/cli.js",
+  "description": "Plex custom metadata providers (TV and movies) with human-written summaries, plus a CLI",
+  "main": "dist/server.js",
   "license": "MIT",
   "author": "Andrew Simone",
   "engines": {
@@ -16,7 +16,9 @@
     "build": "tsc",
     "build:watch": "tsc --watch",
     "cli": "node dist/cli.js",
-    "dev": "ts-node src/cli.ts"
+    "dev": "ts-node src/cli.ts",
+    "start": "node dist/server.js",
+    "dev:server": "ts-node src/server.ts"
   },
   "directories": {
     "doc": "docs",
@@ -27,14 +29,18 @@
     "axios": "^1.12.2",
     "better-sqlite3": "^13.0.3",
     "dotenv": "^17.2.3",
+    "express": "^5.3.0",
     "winston": "^3.18.3"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
+    "@types/express": "^5.0.6",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.7.0",
+    "@types/supertest": "^7.2.1",
     "jest": "^30.2.0",
     "nock": "^14.0.17",
+    "supertest": "^7.3.1",
     "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
