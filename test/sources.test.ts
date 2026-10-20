@@ -76,9 +76,38 @@ describe('TmdbSource', () => {
     await expect(tmdb().getSummary(movie(['tmdb://2']))).resolves.toEqual({ status: 'not-found', externalId: 'tmdb://2' });
   });
 
-  it('needs a usable ID and a movie', async () => {
+  it('needs a usable ID', async () => {
     await expect(tmdb().getSummary(movie(['plex://movie/x']))).resolves.toEqual({ status: 'no-id' });
-    await expect(tmdb().getSummary({ ...movie(['tmdb://1']), type: 'show' })).resolves.toEqual({ status: 'no-id' });
+    // Seasons have no IMDb lookup, and Plex's tmdb:// on a season isn't directly fetchable.
+    await expect(tmdb().getSummary({ ...movie(['tmdb://1', 'imdb://tt1']), type: 'season' })).resolves.toEqual({ status: 'no-id' });
+  });
+
+  it('looks up shows directly by tmdb:// ID', async () => {
+    nock(TMDB).get('/3/tv/1396').query({ api_key: 'key', language: 'en-US' }).reply(200, { overview: 'Walter White...' });
+    await expect(tmdb().getSummary({ ...movie(['tvdb://81189', 'tmdb://1396']), type: 'show' })).resolves.toEqual({
+      status: 'found',
+      summary: 'Walter White...',
+      externalId: 'tmdb://1396',
+    });
+  });
+
+  it('finds seasons and episodes by tvdb:// ID', async () => {
+    nock(TMDB)
+      .get('/3/find/349232')
+      .query({ api_key: 'key', external_source: 'tvdb_id', language: 'en-US' })
+      .reply(200, { tv_episode_results: [{ overview: 'Pilot text.' }] })
+      .get('/3/find/30272')
+      .query({ api_key: 'key', external_source: 'tvdb_id', language: 'en-US' })
+      .reply(200, { tv_season_results: [] });
+    await expect(tmdb().getSummary({ ...movie(['tmdb://62085', 'tvdb://349232']), type: 'episode' })).resolves.toEqual({
+      status: 'found',
+      summary: 'Pilot text.',
+      externalId: 'tvdb://349232',
+    });
+    await expect(tmdb().getSummary({ ...movie(['tvdb://30272']), type: 'season' })).resolves.toEqual({
+      status: 'not-found',
+      externalId: 'tvdb://30272',
+    });
   });
 
   it('reports failures as unavailable', async () => {

@@ -1,23 +1,33 @@
 /**
- * TMDB summaries for movies, by tmdb:// ID or (via /find) imdb:// ID.
+ * TMDB summaries, by ID only:
+ *   movie   tmdb://  → /movie/{id};        imdb:// → /find (movie_results)
+ *   show    tmdb://  → /tv/{id};           tvdb:// or imdb:// → /find (tv_results)
+ *   season  tvdb://  → /find (tv_season_results)
+ *   episode tvdb:// or imdb:// → /find (tv_episode_results)
+ * (Plex's tmdb:// on seasons and episodes is TMDB's internal ID, which TMDB can't look up directly.)
  * Docs: https://developer.themoviedb.org/reference
  */
 
-import { PlexItem } from '../../plex/types';
+import { PlexItem, PlexItemType } from '../../plex/types';
 import { CircuitBreaker } from '../../resilience/circuitBreaker';
 import { HttpSource, NotFoundError, describeError } from '../../resilience/http';
 import { Store } from '../../store/Store';
 import { cleanSummary } from '../../text/cleanSummary';
 import { DAY_MS, SourceLookup, SummarySource, externalId } from '../SummarySource';
 
-interface TmdbMovie {
-  id: number;
+interface TmdbOverview {
   overview?: string;
 }
 
-interface TmdbFind {
-  movie_results?: TmdbMovie[];
-}
+type FindKey = 'movie_results' | 'tv_results' | 'tv_season_results' | 'tv_episode_results';
+type TmdbFind = Partial<Record<FindKey, TmdbOverview[]>>;
+
+const FIND_RESULTS: Record<PlexItemType, FindKey> = {
+  movie: 'movie_results',
+  show: 'tv_results',
+  season: 'tv_season_results',
+  episode: 'tv_episode_results',
+};
 
 export interface TmdbOptions {
   apiKey: string;
@@ -26,6 +36,13 @@ export interface TmdbOptions {
   http?: HttpSource;
   ttlMs?: number;
   notFoundTtlMs?: number;
+}
+
+/** One way to look an item up: the ID used, the cache key, and the fetch. */
+interface Lookup {
+  ref: string;
+  key: string;
+  fetch: () => Promise<string | null>;
 }
 
 export class TmdbSource implements SummarySource {
@@ -47,46 +64,60 @@ export class TmdbSource implements SummarySource {
   }
 
   async getSummary(item: PlexItem): Promise<SourceLookup> {
-    if (item.type !== 'movie') {
+    const lookup = this.lookupFor(item);
+    if (!lookup) {
       return { status: 'no-id' };
     }
-
-    const tmdbId = externalId(item, 'tmdb');
-    const imdbId = externalId(item, 'imdb');
     try {
-      if (tmdbId) {
-        const overview = await this.cached(`tmdb:movie:${tmdbId}`, () => this.movieOverview(tmdbId));
-        return toLookup(overview, `tmdb://${tmdbId}`);
-      }
-      if (imdbId) {
-        const overview = await this.cached(`tmdb:find:${imdbId}`, () => this.findOverview(imdbId));
-        return toLookup(overview, `imdb://${imdbId}`);
-      }
-      return { status: 'no-id' };
+      const overview = await this.cached(lookup.key, lookup.fetch);
+      const summary = cleanSummary(overview);
+      return summary ? { status: 'found', summary, externalId: lookup.ref } : { status: 'not-found', externalId: lookup.ref };
     } catch (error) {
       return { status: 'unavailable', reason: `tmdb: ${describeError(error)}` };
     }
   }
 
-  private async movieOverview(id: string): Promise<string | null> {
+  private lookupFor(item: PlexItem): Lookup | undefined {
+    const tmdbId = externalId(item, 'tmdb');
+    const tvdbId = externalId(item, 'tvdb');
+    const imdbId = externalId(item, 'imdb');
+    const results = FIND_RESULTS[item.type];
+
+    // Direct lookups: only movies and shows have a TMDB ID that TMDB can fetch by itself.
+    if (tmdbId && (item.type === 'movie' || item.type === 'show')) {
+      const path = item.type === 'movie' ? 'movie' : 'tv';
+      return {
+        ref: `tmdb://${tmdbId}`,
+        key: `tmdb:${path}:${tmdbId}`,
+        fetch: () => this.direct(`/${path}/${encodeURIComponent(tmdbId)}`),
+      };
+    }
+    if (tvdbId && item.type !== 'movie') {
+      return { ref: `tvdb://${tvdbId}`, key: `tmdb:find:tvdb:${item.type}:${tvdbId}`, fetch: () => this.find(tvdbId, 'tvdb_id', results) };
+    }
+    if (imdbId && item.type !== 'season') {
+      return { ref: `imdb://${imdbId}`, key: `tmdb:find:imdb:${item.type}:${imdbId}`, fetch: () => this.find(imdbId, 'imdb_id', results) };
+    }
+    return undefined;
+  }
+
+  private async direct(path: string): Promise<string | null> {
     try {
-      const movie = await this.http.getJson<TmdbMovie>(`/movie/${encodeURIComponent(id)}`, {
-        language: this.options.language,
-      });
-      return movie.overview ?? '';
+      const result = await this.http.getJson<TmdbOverview>(path, { language: this.options.language });
+      return result.overview ?? '';
     } catch (error) {
       if (error instanceof NotFoundError) return null;
       throw error;
     }
   }
 
-  private async findOverview(imdbId: string): Promise<string | null> {
-    const result = await this.http.getJson<TmdbFind>(`/find/${encodeURIComponent(imdbId)}`, {
-      external_source: 'imdb_id',
+  private async find(id: string, source: 'imdb_id' | 'tvdb_id', results: FindKey): Promise<string | null> {
+    const found = await this.http.getJson<TmdbFind>(`/find/${encodeURIComponent(id)}`, {
+      external_source: source,
       language: this.options.language,
     });
-    const movie = result.movie_results?.[0];
-    return movie ? (movie.overview ?? '') : null;
+    const first = found[results]?.[0];
+    return first ? (first.overview ?? '') : null;
   }
 
   /** Caches the raw overview (null = not found) per language. */
@@ -100,9 +131,4 @@ export class TmdbSource implements SummarySource {
     this.options.store.cacheSet(fullKey, value, ttl);
     return value;
   }
-}
-
-function toLookup(overview: string | null, id: string): SourceLookup {
-  const summary = cleanSummary(overview);
-  return summary ? { status: 'found', summary, externalId: id } : { status: 'not-found', externalId: id };
 }

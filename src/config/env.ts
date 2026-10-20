@@ -25,6 +25,8 @@ export interface Config {
     /** Writes to Plex are allowed for whole-library syncs only when true. */
     write: boolean;
     writesPerSecond: number;
+    /** Items looked up in parallel. */
+    concurrency: number;
   };
   dataDir: string;
 }
@@ -60,6 +62,7 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
     sync: {
       write: /^(1|true|yes)$/i.test((env.SYNC_WRITE || '').trim()),
       writesPerSecond: positiveInt(env.SYNC_WRITES_PER_SECOND, 5),
+      concurrency: positiveInt(env.SYNC_CONCURRENCY, 4),
     },
     dataDir: (env.DATA_DIR || './data').trim(),
   };

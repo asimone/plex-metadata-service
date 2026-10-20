@@ -42,19 +42,37 @@ export class HttpSource {
   }
 
   /** GETs JSON. Throws NotFoundError on 404; other failures (after retries) throw the last error. */
-  async getJson<T>(url: string, params?: Record<string, string | number>): Promise<T> {
+  async getJson<T>(url: string, params?: Record<string, string | number>, headers?: Record<string, string>): Promise<T> {
     // A 404 resolves inside the breaker so it doesn't count as a failure.
-    const result = await this.breaker.run(() => this.withRetries<T>(url, params));
+    const result = await this.breaker.run(() => this.withRetries<T>('get', url, params, undefined, headers));
     if (result === NOT_FOUND) {
       throw new NotFoundError(`${url} not found`);
     }
     return result;
   }
 
-  private async withRetries<T>(url: string, params?: Record<string, string | number>): Promise<T | typeof NOT_FOUND> {
+  /** POSTs JSON and returns the JSON response (same retry and breaker rules as getJson). */
+  async postJson<T>(url: string, body: unknown): Promise<T> {
+    const result = await this.breaker.run(() => this.withRetries<T>('post', url, undefined, body));
+    if (result === NOT_FOUND) {
+      throw new NotFoundError(`${url} not found`);
+    }
+    return result;
+  }
+
+  private async withRetries<T>(
+    method: 'get' | 'post',
+    url: string,
+    params?: Record<string, string | number>,
+    body?: unknown,
+    headers?: Record<string, string>
+  ): Promise<T | typeof NOT_FOUND> {
     for (let attempt = 0; ; attempt++) {
       try {
-        const response = await this.client.get<T>(url, { params });
+        const response =
+          method === 'get'
+            ? await this.client.get<T>(url, { params, headers })
+            : await this.client.post<T>(url, body, { params, headers });
         return response.data;
       } catch (error) {
         const status = axios.isAxiosError(error) ? error.response?.status : undefined;

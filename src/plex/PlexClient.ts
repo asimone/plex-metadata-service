@@ -58,20 +58,28 @@ export class PlexClient {
    * Yields every item of one type in a section, one page at a time.
    */
   async *listItems(sectionKey: string, type: PlexItemType): AsyncGenerator<PlexItem> {
+    yield* this.paged(`/library/sections/${encodeURIComponent(sectionKey)}/all`, type, { type: PlexType[type] });
+  }
+
+  /** Yields a show's seasons, then all of its episodes. */
+  async *listShowChildren(showRatingKey: string): AsyncGenerator<PlexItem> {
+    const key = encodeURIComponent(showRatingKey);
+    yield* this.paged(`/library/metadata/${key}/children`, 'season');
+    yield* this.paged(`/library/metadata/${key}/allLeaves`, 'episode');
+  }
+
+  private async *paged(url: string, fallbackType: PlexItemType, params: Record<string, string | number> = {}): AsyncGenerator<PlexItem> {
     let start = 0;
     for (;;) {
-      const data = await this.get<RawMediaContainer<RawMetadata>>(
-        `/library/sections/${encodeURIComponent(sectionKey)}/all`,
-        {
-          type: PlexType[type],
-          includeGuids: 1,
-          'X-Plex-Container-Start': start,
-          'X-Plex-Container-Size': this.pageSize,
-        }
-      );
+      const data = await this.get<RawMediaContainer<RawMetadata>>(url, {
+        ...params,
+        includeGuids: 1,
+        'X-Plex-Container-Start': start,
+        'X-Plex-Container-Size': this.pageSize,
+      });
       const page = data.MediaContainer.Metadata ?? [];
       for (const raw of page) {
-        yield toPlexItem(raw, type);
+        yield toPlexItem(raw, fallbackType);
       }
 
       start += page.length;

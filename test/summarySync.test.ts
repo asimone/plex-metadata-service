@@ -154,6 +154,47 @@ describe('SummarySync', () => {
     expect(store.getItem('10')).toBeUndefined();
   });
 
+  it('looks up items concurrently but still writes one at a time', async () => {
+    const items = ['1', '2', '3', '4', '5'].map(k => movie({ ratingKey: k }));
+    const { plex, writes } = fakePlex(items);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const slow: SummarySource = {
+      name: 'tmdb',
+      async getSummary(i) {
+        inFlight++;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        await new Promise(r => setTimeout(r, 5));
+        inFlight--;
+        return found(`Text ${i.ratingKey}.`);
+      },
+    };
+    const sleeps: number[] = [];
+    const sync = new SummarySync(plex, store, [slow], async ms => {
+      sleeps.push(ms);
+    });
+    const counts = await sync.syncSections([{ key: '1', title: 'Movies', type: 'movie' }], {
+      write: true,
+      concurrency: 3,
+      writeIntervalMs: 50,
+    });
+    expect(counts.write).toBe(5);
+    expect(maxInFlight).toBe(3);
+    expect(writes).toHaveLength(5);
+    // Writes after the first wait for the interval.
+    expect(sleeps.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('uses TVDB then TMDB for TV items', async () => {
+    const { plex } = fakePlex();
+    const tvdb: SummarySource = { name: 'tvdb', getSummary: async () => ({ status: 'not-found', externalId: 'tvdb://1' }) };
+    const sync = new SummarySync(plex, store, [tvdb, source('tmdb', { '10': found('From TMDB.', 'tmdb://1396') })]);
+    const { winner, lookups } = await sync.resolve(movie({ type: 'episode' }));
+    expect(lookups.map(l => l.source)).toEqual(['tvdb', 'tmdb']);
+    expect(winner?.source).toBe('tmdb');
+    expect(sync.supportedTypes()).toEqual(['movie', 'show', 'season', 'episode']);
+  });
+
   it('spaces writes out by the write interval', async () => {
     const { plex } = fakePlex();
     const sleeps: number[] = [];

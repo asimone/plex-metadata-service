@@ -11,10 +11,11 @@ import { PlexSection } from './plex/types';
 import { OmdbSource } from './sources/omdb/OmdbSource';
 import { SummarySource } from './sources/SummarySource';
 import { TmdbSource } from './sources/tmdb/TmdbSource';
+import { TvdbSource } from './sources/tvdb/TvdbSource';
 import { Store } from './store/Store';
 import { formatItem, formatReport, runDryRun, displayTitle } from './sync/dryRun';
 import { isSupportedSection, selectSections } from './sync/libraries';
-import { Outcome, SummarySync, describeLookup } from './sync/SummarySync';
+import { Outcome, SummarySync, SyncCounts, describeLookup, emptyCounts, forEachConcurrent, tally } from './sync/SummarySync';
 import logger from './utils/logger';
 
 const USAGE = `Usage:
@@ -23,6 +24,7 @@ const USAGE = `Usage:
                                         List items and their external IDs (read-only)
   cli sync [--library X] [--item <ratingKey>]... [--all] [--full] [--write]
                                         Dry run by default: show which summaries would change.
+                                        --item on a show covers its seasons and episodes too.
                                         --write applies changes. Whole-library writes also need
                                         SYNC_WRITE=true; --item writes don't.
   cli show <ratingKey>                  Plex's summary next to every source's, and the decision
@@ -101,6 +103,11 @@ async function withSync(config: Config, plex: PlexClient, fn: (sync: SummarySync
   const store = new Store(path.join(config.dataDir, 'summary-sync.db'));
   try {
     const sources: SummarySource[] = [];
+    if (config.sources.tvdbApiKey) {
+      sources.push(
+        new TvdbSource({ apiKey: config.sources.tvdbApiKey, pin: config.sources.tvdbPin, language: config.sources.language, store })
+      );
+    }
     if (config.sources.tmdbApiKey) {
       sources.push(new TmdbSource({ apiKey: config.sources.tmdbApiKey, language: config.sources.language, store }));
     }
@@ -148,7 +155,7 @@ async function runSync(
     return 1;
   }
   if (sync.supportedTypes().length === 0) {
-    logger.error('No summary sources configured. Set TMDB_API_KEY (and optionally OMDB_API_KEY).');
+    logger.error('No summary sources configured. Set TVDB_API_KEY and/or TMDB_API_KEY (OMDB_API_KEY is optional).');
     return 1;
   }
 
@@ -157,26 +164,33 @@ async function runSync(
   const options = {
     write: opts.write,
     writeIntervalMs: Math.ceil(1000 / config.sync.writesPerSecond),
+    concurrency: config.sync.concurrency,
     onOutcome: (o: Outcome) => printOutcome(o, opts),
   };
 
+  let counts: SyncCounts;
   if (opts.items.length > 0) {
-    let failed = 0;
+    counts = emptyCounts();
     for (const ratingKey of opts.items) {
       const found = await plex.getItem(ratingKey);
       if (!found) {
         logger.error(`No Plex item with ratingKey ${ratingKey}`);
-        failed++;
+        counts.errors++;
         continue;
       }
-      const outcome = await sync.syncItem(found.item, found.sectionKey, options);
-      if (outcome.error) failed++;
+      tally(counts, await sync.syncItem(found.item, found.sectionKey, options));
+      // A show means the whole show: its seasons and episodes too.
+      if (found.item.type === 'show') {
+        await forEachConcurrent(plex.listShowChildren(ratingKey), options.concurrency, async child => {
+          tally(counts, await sync.syncItem(child, found.sectionKey, options));
+        });
+      }
     }
-    return failed > 0 ? 1 : 0;
+  } else {
+    const sections = await chooseSections(plex, config, opts.libraries);
+    counts = await sync.syncSections(sections, options);
   }
 
-  const sections = await chooseSections(plex, config, opts.libraries);
-  const counts = await sync.syncSections(sections, options);
   const verb = opts.write ? 'written' : 'would write';
   out(
     `\n${counts.write} ${verb}, ${counts.lock} ${opts.write ? 'locked' : 'would lock'} (same text), ` +

@@ -68,6 +68,26 @@ describe('PlexClient.listItems', () => {
     expect(nock.isDone()).toBe(true);
   });
 
+  it("lists a show's seasons and then its episodes", async () => {
+    nock(URL)
+      .get('/library/metadata/9/children')
+      .query(q => q.includeGuids === '1')
+      .reply(200, { MediaContainer: { totalSize: 1, Metadata: [{ ratingKey: '91', type: 'season', title: 'Season 1' }] } })
+      .get('/library/metadata/9/allLeaves')
+      .query(q => q.includeGuids === '1')
+      .reply(200, {
+        MediaContainer: {
+          totalSize: 2,
+          Metadata: [
+            { ratingKey: '911', type: 'episode', title: 'Pilot' },
+            { ratingKey: '912', type: 'episode', title: 'Two' },
+          ],
+        },
+      });
+    const items = await collect(client().listShowChildren('9'));
+    expect(items.map(i => `${i.type}:${i.ratingKey}`)).toEqual(['season:91', 'episode:911', 'episode:912']);
+  });
+
   it('stops on a short page when totalSize is missing', async () => {
     nock(URL)
       .get('/library/sections/2/all')

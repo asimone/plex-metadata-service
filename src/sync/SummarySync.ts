@@ -9,12 +9,12 @@ import { ItemRecord, Store } from '../store/Store';
 import logger from '../utils/logger';
 import { Action, Decision, Winner, decide } from './decide';
 
-/** Source priority per item type. TV sources arrive in Phase 3. */
+/** Source priority per item type. */
 export const SOURCE_ORDER: Record<PlexItemType, SourceName[]> = {
   movie: ['tmdb', 'omdb'],
-  show: [],
-  season: [],
-  episode: [],
+  show: ['tvdb', 'tmdb'],
+  season: ['tvdb', 'tmdb'],
+  episode: ['tvdb', 'tmdb'],
 };
 
 export interface Resolution {
@@ -37,6 +37,8 @@ export interface SyncOptions {
   write: boolean;
   /** Minimum gap between writes to Plex. */
   writeIntervalMs?: number;
+  /** Items resolved in parallel (source lookups). Writes stay spaced by writeIntervalMs. */
+  concurrency?: number;
   onOutcome?: (outcome: Outcome) => void;
 }
 
@@ -45,6 +47,7 @@ export type SyncCounts = Record<Action | 'errors', number>;
 export class SummarySync {
   private sources: Map<SourceName, SummarySource>;
   private lastWriteAt = 0;
+  private writeQueue: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly plex: PlexClient,
@@ -90,9 +93,9 @@ export class SummarySync {
         continue;
       }
       for (const type of types) {
-        for await (const item of this.plex.listItems(section.key, type)) {
+        await forEachConcurrent(this.plex.listItems(section.key, type), options.concurrency ?? 1, async item => {
           tally(counts, await this.syncItem(item, section.key, options));
-        }
+        });
       }
     }
     return counts;
@@ -199,10 +202,15 @@ export class SummarySync {
     };
   }
 
-  private async throttle(intervalMs: number): Promise<void> {
-    const wait = this.lastWriteAt + intervalMs - Date.now();
-    if (wait > 0) await this.sleep(wait);
-    this.lastWriteAt = Date.now();
+  /** Spaces writes out; callers queue up so concurrent lookups still write one at a time. */
+  private throttle(intervalMs: number): Promise<void> {
+    const turn = this.writeQueue.then(async () => {
+      const wait = this.lastWriteAt + intervalMs - Date.now();
+      if (wait > 0) await this.sleep(wait);
+      this.lastWriteAt = Date.now();
+    });
+    this.writeQueue = turn.catch(() => undefined);
+    return turn;
   }
 }
 
@@ -219,11 +227,24 @@ export function describeLookup(lookup: SourceLookup): string {
   }
 }
 
-function emptyCounts(): SyncCounts {
+/** Runs fn over an async iterable with at most `limit` calls in flight. */
+export async function forEachConcurrent<T>(items: AsyncIterable<T>, limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  const running = new Set<Promise<void>>();
+  for await (const item of items) {
+    const task: Promise<void> = fn(item).finally(() => running.delete(task));
+    running.add(task);
+    if (running.size >= Math.max(1, limit)) {
+      await Promise.race(running);
+    }
+  }
+  await Promise.all(running);
+}
+
+export function emptyCounts(): SyncCounts {
   return { write: 0, lock: 0, unchanged: 0, 'user-owned': 0, 'no-source': 0, errors: 0 };
 }
 
-function tally(counts: SyncCounts, outcome: Outcome): void {
+export function tally(counts: SyncCounts, outcome: Outcome): void {
   if (outcome.error) counts.errors++;
   else counts[outcome.action]++;
 }

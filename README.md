@@ -2,7 +2,7 @@
 
 Replaces Plex's AI-rewritten summaries with human-written ones (TVDB for TV, TMDB/OMDb for movies), writes them into Plex through its API, and locks them so refreshes don't overwrite them. Plex's own agents keep doing matching, artwork, cast, ratings and collections.
 
-**Status:** in development. Movie sync (Phase 2) works: dry run by default, writes on request. TV comes in Phase 3. See [PLAN.md](PLAN.md).
+**Status:** in development. Movie and TV sync work: dry run by default, writes on request. See [PLAN.md](PLAN.md).
 
 ## Setup
 
@@ -26,12 +26,14 @@ npm run cli -- list --summary-only            # external-ID coverage per library
 npm run cli -- sync                           # DRY RUN: which summaries would change
 npm run cli -- sync --all --full              # every item, full text
 npm run cli -- show <ratingKey>               # Plex's summary vs each source, and the decision
-npm run cli -- sync --item <ratingKey> --write   # write one item
+npm run cli -- sync --item <ratingKey> --write   # write one item (a show includes its seasons and episodes)
 npm run cli -- restore <ratingKey>            # put Plex's original back and unlock
 ```
 
 **How a sync decides, per item:**
-- Look up a summary by ID: TMDB (`tmdb://`, or `imdb://` via /find), then OMDb (`imdb://`). Never by title.
+- Look up a summary by ID, never by title:
+  - TV shows, seasons and episodes: TVDB (the item's own `tvdb://` ID), then TMDB.
+  - Movies: TMDB (`tmdb://`, or `imdb://` via /find), then OMDb (`imdb://`).
 - If it differs from Plex's, write it and **lock** the field (the same as editing it in Plex). If it's the same, just lock it.
 - If no source has one, leave Plex's alone.
 - If a summary is locked and isn't what this tool last wrote, someone edited it in Plex: it's left alone for good.
