@@ -1,0 +1,18 @@
+# Plex metadata providers. Plex calls http://<host-ip>:3000/movie (and /tv later).
+# Run from the repo checkout:  docker compose up -d --build
+services:
+  plex-metadata:
+    build: .
+    image: plex-metadata:local
+    container_name: plex-metadata
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    labels:
+      # Built locally, nothing to pull: keep Watchtower away from it.
+      com.centurylinklabs.watchtower.enable: "false"

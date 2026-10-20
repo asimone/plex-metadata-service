@@ -1,0 +1,31 @@
+# Environment variables
+.env
+
+# Node modules
+node_modules/
+
+# Build output
+dist/
+
+# Test coverage
+coverage/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local data (SQLite cache, budgets)
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Local config (ship only the *.example.yaml files)
+config/*.yaml
+!config/*.example.yaml
