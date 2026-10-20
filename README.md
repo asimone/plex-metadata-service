@@ -48,11 +48,9 @@ npm run dev -- libraries   # ts-node, no build step
 
 ## Data sources and attribution
 
-Summaries written by this tool come from these services. Each requires attribution:
-
-- **TheTVDB:** TV metadata provided by [TheTVDB.com](https://thetvdb.com). Please consider [subscribing](https://thetvdb.com/subscribe) to support it.
-- **TMDB:** This product uses the [TMDB](https://www.themoviedb.org) API but is not endorsed or certified by TMDB.
-- **OMDb:** Plot data from the [OMDb API](https://www.omdbapi.com) (sourced from IMDb).
+- TV metadata provided by [TheTVDB.com](https://thetvdb.com).
+- This product uses the [TMDB](https://www.themoviedb.org) API but is not endorsed or certified by TMDB.
+- Plot data from the [OMDb API](https://www.omdbapi.com).
 
 ## Credits
 
