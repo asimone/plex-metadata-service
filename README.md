@@ -184,7 +184,9 @@ All settings go in `.env` next to `docker-compose.yml`. Apply changes with `dock
 
 ## 6. Command-line tools (optional)
 
-The repo also has a command-line tool that talks to Plex directly (Node 22+). It's useful for inspecting IDs and summaries, or fixing a single item in a library that doesn't use these providers. It needs `PLEX_URL` and `PLEX_TOKEN` in `.env`. To get the token, open any item in Plex Web → **⋯ → Get Info → View XML**, and copy `X-Plex-Token` from the URL.
+The repo also has a command-line tool that talks to Plex directly (Node 22+). It's useful for inspecting IDs and summaries, or fixing a single item in a library that doesn't use these providers. It needs `PLEX_URL` and `PLEX_TOKEN` in `.env`. These are optional, and the providers don't use them. To get the token, open any item in Plex Web → **⋯ → Get Info → View XML**, and copy `X-Plex-Token` from the URL.
+
+> **The Plex token gives full read/write access to your Plex server** (the server owner's account), because Plex has no read-only tokens. Keep it only where you run the CLI, treat it like a password, and revoke it if needed with **Sign out of all devices** in your Plex account.
 
 ```bash
 npm install && npm run build
