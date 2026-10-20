@@ -41,6 +41,17 @@ type Parsed =
   | { type: 'season'; showId: string; season: number }
   | { type: 'episode'; episodeId: string };
 
+/**
+ * Search queries to try in order: the title as given, then the part before a subtitle separator
+ * (":", " - ", "–", "—") when that leaves something meaningful.
+ */
+export function searchQueries(title: string): string[] {
+  const queries = [title.trim()];
+  const main = title.split(/\s*(?::|\s[-–—]\s|[–—])\s*/)[0].trim();
+  if (main.length >= 3 && main !== queries[0]) queries.push(main);
+  return queries;
+}
+
 export function parseTvRatingKey(ratingKey: string): Parsed | undefined {
   let m = /^tvdb-show-(\d+)$/.exec(ratingKey);
   if (m) return { type: 'show', showId: m[1] };
@@ -186,8 +197,14 @@ export class TvProvider {
     }
     if (!title) return [];
 
-    let results = await this.tvdb.search(title, lang, year);
-    if (results.length === 0 && year) results = await this.tvdb.search(title, lang);
+    // TVDB's search often finds nothing for long titles with subtitles (e.g. "Winning Time: The Rise
+    // of the Lakers Dynasty"), so fall back to the main title. Ranking still uses the full title.
+    let results: TvdbSearchResult[] = [];
+    for (const query of searchQueries(title)) {
+      results = await this.tvdb.search(query, lang, year);
+      if (results.length === 0 && year) results = await this.tvdb.search(query, lang);
+      if (results.length > 0) break;
+    }
     const ranked = rank(
       { title, year },
       results.map((r: TvdbSearchResult) => ({ ...r, title: r.translatedName ?? r.name, originalTitle: r.name, alternateTitles: r.aliases }))
