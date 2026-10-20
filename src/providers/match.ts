@@ -58,6 +58,8 @@ function tokenOverlap(a: string, b: string): number {
 export interface Candidate {
   title: string;
   originalTitle?: string;
+  /** Other known names (translations, aliases). */
+  alternateTitles?: string[];
   year?: number;
   popularity?: number;
 }
@@ -67,7 +69,7 @@ export interface Candidate {
  */
 export function scoreCandidate(wanted: { title: string; year?: number }, c: Candidate): number {
   const want = normalizeTitle(wanted.title);
-  const titles = [c.title, c.originalTitle].filter((t): t is string => Boolean(t)).map(normalizeTitle);
+  const titles = [c.title, c.originalTitle, ...(c.alternateTitles ?? [])].filter((t): t is string => Boolean(t)).map(normalizeTitle);
   let score = titles.includes(want) ? 100 : Math.max(0, ...titles.map(t => tokenOverlap(want, t))) * 60;
 
   if (wanted.year && c.year) {
