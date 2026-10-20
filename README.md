@@ -47,7 +47,8 @@ A provider without its key is simply switched off. For example, without `TVDB_AP
 ## 2. Deploy with Docker
 
 ### Requirements
-- A machine with Docker and Docker Compose that your Plex server can reach over the network. It can be the Plex machine itself.
+- A machine with Docker and Docker Compose that your Plex server can reach over the network. This can be a separate machine, or the same machine that runs Plex.
+  - **Same machine as Plex:** in Plex, use the machine's **LAN IP** in the provider URL, e.g. `http://192.168.1.10:3000/movie`, not `localhost`. If Plex runs in Docker, `localhost` inside the Plex container points at the Plex container itself, not at this service.
 - Port **3000** free on that machine, or change the mapping in `docker-compose.yml`.
 
 ### Install
@@ -151,9 +152,6 @@ From then on, **new items** are matched and described by the provider. Existing 
 
 ### Undo
 Set the library's agent back to **Plex Movie** / **Plex Series** and refresh. Nothing in your media folders is ever modified.
-
-### Renaming after an upgrade
-Provider names come from the service. If you added the providers before they were renamed, Plex may keep showing the old names. Remove and re-add the provider, or simply rename your agents in **Metadata Agents**. The underlying IDs never change, so matches aren't affected.
 
 ## 4. Configuration
 
