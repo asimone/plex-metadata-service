@@ -80,3 +80,14 @@ npm run cli -- list --library "TV Shows" | grep "no external IDs"
 1. `sync --item … --write`: Plex showed our text with the summary **locked**, and the next sync reported `unchanged`.
 2. **Refresh Metadata in Plex** on all three: the text and the lock both survived. A `PUT /library/sections/{id}/all … summary.locked=1` behaves like a manual edit.
 3. `restore`: Plex's original text came back, **unlocked**. The local records were removed, and the next dry run sees the items as new again (`write` / `lock`).
+
+## Run 3 — 2026-10-20 (Phase 3, TV)
+
+- **One show end to end** (`sync --item 28489`, dry run): the show, its season and all 12 episodes resolved from TVDB by their own IDs.
+  - 3 would be written: the show-level summary plus 2 episodes.
+  - 10 episodes already match TVDB, so they would only be locked.
+  - The season has no summary on TVDB or TMDB.
+- **Partial library dry run**, stopped on purpose once the approach was proven: about 16,400 items processed.
+  - 6,172 would be written, 7,211 lock only, 2,984 no source summary (mostly seasons, plus legacy-agent shows without IDs).
+  - **0 errors, 0 rate-limit (429) responses, no circuit trips** at 4 concurrent lookups.
+- Takeaway: TV works the same way as movies. Fix individual shows on demand with `sync --item <show ratingKey> --write`; there's no need to sweep the whole library.
