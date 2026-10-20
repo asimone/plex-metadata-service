@@ -72,7 +72,7 @@ Everything else (art, cast, ratings, genres, content rating, studio, duration) i
   - the exact URL format Plex wants.
 - **Done when:** the test library looks right and the findings are recorded.
 
-### Phase 6: TV provider
+### Phase 6: TV provider ✅
 - `GET /tv` declaring types 2, 3 and 4. Matching for shows (`tvdb://` hint, then TVDB search by title + year), seasons (show + index) and episodes (show + `parentIndex`/`index`, or air `date`).
 - Metadata for show, season and episode from TVDB extended records plus translations. `includeChildren`, `/children` and `/grandchildren` with paging.
 - **Done when:** contract tests pass, and a test TV library matches and displays correctly, with art, cast and ratings filled by Plex Series.

@@ -5,7 +5,7 @@ Custom metadata providers for Plex (Plex Media Server 1.43+) that replace Plex's
 | Provider | URL | Source |
 |---|---|---|
 | Movies | `http://<host>:3000/movie` | TMDB (OMDb as fallback) |
-| TV | `http://<host>:3000/tv` | TVDB (coming soon) |
+| TV | `http://<host>:3000/tv` | TVDB (TMDB as fallback) |
 
 ## Required API keys
 
@@ -34,24 +34,51 @@ Check that it's running:
 
 ```bash
 curl http://<host>:3000/movie
+curl http://<host>:3000/tv
 ```
+
+Each returns a small JSON description of the provider. If `/tv` gives a 404, `TVDB_API_KEY` isn't set.
 
 To update, copy in the new code and run `docker compose up -d --build` again.
 
 ## Set up in Plex
 
-1. **Settings → Metadata Agents → Add Provider**, and enter `http://<host>:3000/movie`.
-2. **Add Agent**, named e.g. *Movies (Simone)*:
-   - primary provider: **Simone Movies**
-   - below it: **Plex Movie**, then optionally **Plex Local Media**.
+Plex needs two things for each library type:
+- a **provider**: this service's URL;
+- an **agent**: a named list of providers. This service goes first, as the *primary*, with Plex's own agent below it to fill in posters, cast and ratings.
 
-   If the new agent doesn't show up in menus, refresh the page with Ctrl+F5.
-3. Open your Movies library and go to **Edit Library → Advanced → Agent → Movies (Simone)**, then save.
-4. **Manage Library → Refresh All Metadata**.
+Do this in Plex Web as the server owner.
 
-**Fixing a wrong match:** use **Fix Match** in Plex. For a match that sticks, add `{tmdb-<id>}` or `{imdb-tt…}` to the movie's folder name. Radarr adds `{imdb-…}` by default.
+### 1. Add the providers
 
-**Undo:** set the library's agent back to **Plex Movie** and refresh. Your files are never changed.
+1. **Settings** (wrench icon) → **Metadata Agents**.
+2. **Add Provider** → `http://<host>:3000/movie` → save. It appears as **Simone Movies**.
+3. **Add Provider** again → `http://<host>:3000/tv` → save. It appears as **Simone TV**.
+
+### 2. Add the agents
+
+On the same page:
+
+| | Movies agent | TV agent |
+|---|---|---|
+| **Add Agent**, name | *Movies (Simone)* | *TV (Simone)* |
+| Primary provider | **Simone Movies** | **Simone TV** |
+| Then add, in order | **Plex Movie**, optionally **Plex Local Media** | **Plex Series**, optionally **Plex Local Media** |
+
+Save each one. If a new agent doesn't show up in the library menus, refresh the page with Ctrl+F5.
+
+### 3. Point a library at the agent
+
+1. Hover over the library → **⋯ → Edit Library → Advanced**.
+2. **Agent** → *Movies (Simone)* or *TV (Simone)* → **Save Changes**.
+
+New items are matched by this service from then on. To update items already in the library, use **⋯ → Refresh Metadata** on one item, or **Manage Library → Refresh All Metadata** for everything.
+
+**Tip:** to try it out first, add a second library that points at the same folders and uses the new agent. Delete it afterwards; your files aren't touched.
+
+**Fixing a wrong match:** use **Fix Match** in Plex. For a match that sticks, put an ID tag in the folder name: `{tmdb-<id>}` or `{imdb-tt…}` for movies (Radarr adds `{imdb-…}` by default), and `{tvdb-<id>}` for shows (Sonarr can add it).
+
+**Undo:** set the library's agent back to **Plex Movie** or **Plex Series** and refresh. Your files are never changed.
 
 ## Configuration
 
@@ -70,9 +97,9 @@ Logs: `docker logs -f plex-metadata`.
 
 | Problem | Fix |
 |---|---|
-| Plex can't add the provider | Make sure `curl http://<host>:3000/movie` works from the Plex machine |
-| Wrong movie | Use **Fix Match**, or add `{tmdb-<id>}` to the folder name |
-| Plex's summary still shows | TMDB (and OMDb) had no summary for that movie |
+| Plex can't add the provider | Make sure `curl http://<host>:3000/movie` (or `/tv`) works from the Plex machine |
+| Wrong movie or show | Use **Fix Match**, or add `{tmdb-<id>}` (movies) or `{tvdb-<id>}` (shows) to the folder name |
+| Plex's summary still shows | None of the sources had an English summary for that item |
 | `omdb: HTTP 401` in logs | Activate the OMDb key from the email |
 
 ## Command-line tools (optional)

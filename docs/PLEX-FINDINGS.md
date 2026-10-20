@@ -111,3 +111,18 @@ Setup: provider at `http://12.27.27.211:3000/movie` (Docker on Tufte), agent "Mo
 
 **Calls per movie:** `POST …/matches`, then `GET …/metadata/{key}`, then `GET …/metadata/{key}/extras?X-Plex-Container-Size=50…`. Plex also sends `X-Plex-Text-Format=markdown`.
 - `/extras` isn't in the spec docs. It used to fall through to Express's HTML 404; it now returns an empty container.
+
+## Run 5 — 2026-10-20 (Phase 6, TV provider as primary)
+
+Setup: `http://12.27.27.211:3000/tv`, agent "TV (Simone)" (primary) with Plex Series below it, test library on the real TV folders.
+
+- **Flow per show:**
+  1. Optionally `GET` the show by its old Plex ID (a 24-character hex ID from the existing library). We answer 404.
+  2. `POST …/matches` (type 2, `includeChildren=1`, `episodeOrder=tvdbAiring`).
+  3. `GET` the show, then its extras.
+  4. `GET` each season with `includeChildren=1`.
+
+  No separate season or episode match requests were seen.
+- The match body has `title`, `year` and `filename` (a path containing Sonarr's `[tvdb-…]` folder tag), so shows match **by TVDB ID**.
+- Partial scan: 17 shows matched, 70 seasons served, 0 failed matches, 0 errors. Summaries, numbering, and artwork from Plex Series looked right in the UI.
+- `episodeOrder=tvdbAiring` matches our aired-order seasons.
