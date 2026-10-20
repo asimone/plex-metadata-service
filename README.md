@@ -57,7 +57,7 @@ A provider without its key is simply switched off. For example, without `TVDB_AP
    ```bash
    git clone https://github.com/asimone/plex-metadata-service.git ~/docker/plex-metadata
    ```
-   The repo is private, so if the host has no GitHub access, copy it from a checkout on another machine:
+   If the host has no internet access, copy it from a checkout on another machine instead:
    ```bash
    git archive HEAD | ssh <user>@<host> "mkdir -p docker/plex-metadata && tar -x -C docker/plex-metadata"
    ```
