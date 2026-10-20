@@ -1,47 +1,34 @@
-import { readConfig, validateConfig } from '../src/config/env';
+import { readConfig } from '../src/config/env';
 
 describe('readConfig', () => {
-  it('trims values, strips trailing slashes and splits libraries', () => {
+  it('reads and trims source keys and settings', () => {
     const config = readConfig({
-      PLEX_URL: ' http://10.0.0.5:32400/ ',
-      PLEX_TOKEN: ' abc ',
-      PLEX_LIBRARIES: 'Movies, TV Shows ,,',
-      TMDB_API_KEY: 'k',
+      TMDB_API_KEY: ' tmdb ',
+      TVDB_API_KEY: 'tvdb',
+      TVDB_PIN: '1234',
+      OMDB_API_KEY: 'omdb',
+      OMDB_DAILY_CAP: '500',
+      SUMMARY_LANGUAGE: 'de-DE',
+      DATA_DIR: '/data',
     });
-    expect(config.plex).toEqual({
-      url: 'http://10.0.0.5:32400',
-      token: 'abc',
-      libraries: ['Movies', 'TV Shows'],
+    expect(config).toEqual({
+      sources: {
+        tmdbApiKey: 'tmdb',
+        tvdbApiKey: 'tvdb',
+        tvdbPin: '1234',
+        omdbApiKey: 'omdb',
+        omdbDailyCap: 500,
+        language: 'de-DE',
+      },
+      dataDir: '/data',
     });
-    expect(config.sources.tmdbApiKey).toBe('k');
   });
 
-  it('defaults to no library selection', () => {
-    expect(readConfig({}).plex.libraries).toEqual([]);
-  });
-});
-
-describe('validateConfig', () => {
-  it('requires PLEX_URL and PLEX_TOKEN', () => {
-    const { errors } = validateConfig(readConfig({}));
-    expect(errors).toHaveLength(2);
-    expect(errors.join('\n')).toMatch(/PLEX_URL/);
-    expect(errors.join('\n')).toMatch(/PLEX_TOKEN/);
-  });
-
-  it('rejects a URL without a scheme', () => {
-    const { errors } = validateConfig(readConfig({ PLEX_URL: '10.0.0.5:32400', PLEX_TOKEN: 't' }));
-    expect(errors).toEqual([expect.stringMatching(/must start with http/)]);
-  });
-
-  it('warns, but does not fail, when no source keys are set', () => {
-    const { errors, warnings } = validateConfig(readConfig({ PLEX_URL: 'http://plex:32400', PLEX_TOKEN: 't' }));
-    expect(errors).toEqual([]);
-    expect(warnings).toEqual([expect.stringMatching(/No source API keys/)]);
-  });
-
-  it('is clean with Plex settings and a source key', () => {
-    const result = validateConfig(readConfig({ PLEX_URL: 'http://plex:32400', PLEX_TOKEN: 't', TVDB_API_KEY: 'x' }));
-    expect(result).toEqual({ errors: [], warnings: [] });
+  it('has sensible defaults', () => {
+    const config = readConfig({ OMDB_DAILY_CAP: 'lots' });
+    expect(config.sources.omdbDailyCap).toBe(900);
+    expect(config.sources.language).toBe('en-US');
+    expect(config.dataDir).toBe('./data');
+    expect(config.sources.tmdbApiKey).toBe('');
   });
 });

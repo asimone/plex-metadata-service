@@ -20,7 +20,6 @@ Each provider is the **primary** source of its own Plex agent. It matches your f
 3. [Add it to Plex](#3-add-it-to-plex)
 4. [Configuration](#4-configuration)
 5. [Troubleshooting](#5-troubleshooting)
-6. [Command-line tools (optional)](#6-command-line-tools-optional)
 
 ## 1. Required API keys
 
@@ -181,20 +180,6 @@ All settings go in `.env` next to `docker-compose.yml`. Apply changes with `dock
 | Plex's own summary still shows | None of the sources has an English summary for that item, or the item hasn't been refreshed since switching agents |
 | `omdb: HTTP 401` in logs | Activate the OMDb key from the email |
 | `tvdb: HTTP 401` in logs | Check `TVDB_API_KEY`, or set `TVDB_PIN` if your key type needs one |
-
-## 6. Command-line tools (optional)
-
-The repo also has a command-line tool that talks to Plex directly (Node 22+). It's useful for inspecting IDs and summaries, or fixing a single item in a library that doesn't use these providers. It needs `PLEX_URL` and `PLEX_TOKEN` in `.env`. These are optional, and the providers don't use them. To get the token, open any item in Plex Web → **⋯ → Get Info → View XML**, and copy `X-Plex-Token` from the URL.
-
-> **The Plex token gives full read/write access to your Plex server** (the server owner's account), because Plex has no read-only tokens. Keep it only where you run the CLI, treat it like a password, and revoke it if needed with **Sign out of all devices** in your Plex account.
-
-```bash
-npm install && npm run build
-npm run cli -- libraries                       # libraries and their agents
-npm run cli -- show <ratingKey>                # Plex's summary vs each source
-npm run cli -- sync --item <ratingKey> --write # write and lock one item's summary
-npm run cli -- restore <ratingKey>             # undo
-```
 
 ## Data sources
 

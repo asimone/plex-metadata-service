@@ -3,12 +3,11 @@
  * Docs: https://www.omdbapi.com/
  */
 
-import { PlexItem } from '../../plex/types';
 import { CircuitBreaker } from '../../resilience/circuitBreaker';
 import { HttpSource, describeError } from '../../resilience/http';
 import { Store } from '../../store/Store';
 import { cleanSummary } from '../../text/cleanSummary';
-import { DAY_MS, SourceLookup, SummarySource, externalId } from '../SummarySource';
+import { DAY_MS, LookupItem, SourceLookup, SummarySource, externalId } from '../SummarySource';
 
 interface OmdbResponse {
   Response: 'True' | 'False';
@@ -47,7 +46,7 @@ export class OmdbSource implements SummarySource {
     return this.options.store.budgetUsed('omdb');
   }
 
-  async getSummary(item: PlexItem): Promise<SourceLookup> {
+  async getSummary(item: LookupItem): Promise<SourceLookup> {
     const imdbId = externalId(item, 'imdb');
     if (!imdbId) {
       return { status: 'no-id' };

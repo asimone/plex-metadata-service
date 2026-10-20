@@ -2,7 +2,7 @@
 
 Two Plex **Custom Metadata Providers** that Plex calls itself: one for TV, one for movies. Each is the **primary** provider of its own Plex agent, with Plex's own agents below it to fill in everything we leave out. Plex handles all automation: matching new items, refreshes, and whole-library updates.
 
-**What changed from rev. 5:** the standalone CLI sync (Phases 1–3) proved the sources, IDs, cleanup and Plex behavior. But it needs a person to run it. Plex should drive this instead, so the work returns to the provider model with a firm decision that **ours is primary**. The sources, cache, resilience and cleanup code carry over unchanged. The sync/CLI stays as a diagnostic tool.
+**What changed from rev. 5:** an earlier standalone sync tool (Phases 1–3) proved the sources, IDs, cleanup and Plex behavior; it has since been removed so the project is only the provider service.
 
 ---
 
@@ -83,7 +83,7 @@ Everything else (art, cast, ratings, genres, content rating, studio, duration) i
 
 ## 5. What carries over from Phases 1–3
 - `sources/` (TVDB, TMDB, OMDb), `resilience/` (retries, circuit breaker), `store/` (SQLite cache), `text/cleanSummary`.
-- The CLI (`list`, `show`, `sync`, `restore`) stays as a diagnostic and manual tool. It isn't needed once the providers are live.
+- The CLI (`list`, `show`, `sync`, `restore`) was removed to keep the project a single service.
 
 ## 6. Working rules
 - One branch per phase. Run `npm test` and `npm run build` before each commit.

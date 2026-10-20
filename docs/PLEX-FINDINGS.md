@@ -35,12 +35,6 @@ No separate season or episode match requests were seen.
 - `episodeOrder=tvdbAiring` corresponds to TVDB's aired ("official") order.
 - With the provider as primary and Plex Movie / Plex Series below it, artwork, cast and ratings were filled in correctly by Plex's agent.
 
-## Plex API (CLI tools)
-
-- `GET /library/sections/{id}/all?type={1|2|3|4}&includeGuids=1` returns each item's external IDs (`imdb://`, `tmdb://`, `tvdb://`) for movies, shows, seasons and episodes. Items matched by Plex Series carry their **own** TVDB IDs, including on seasons and episodes.
-- Items still matched by the legacy **TheTVDB agent** have no `Guid` array. Their IDs are embedded in the Plex GUID instead: `com.plexapp.agents.thetvdb://<series>/<season>/<episode>?lang=en`.
-- `PUT /library/sections/{id}/all?type=…&id={ratingKey}&summary.value=…&summary.locked=1` behaves like a manual edit. The text and the lock survive **Refresh Metadata**. Sending the original text with `summary.locked=0` restores it.
-
 ## Sources
 
 - **TVDB:**

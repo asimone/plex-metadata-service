@@ -1,5 +1,5 @@
 import nock from 'nock';
-import { PlexItem } from '../src/plex/types';
+import { LookupItem } from '../src/sources/SummarySource';
 import { CircuitBreaker } from '../src/resilience/circuitBreaker';
 import { HttpSource } from '../src/resilience/http';
 import { OmdbSource } from '../src/sources/omdb/OmdbSource';
@@ -9,12 +9,9 @@ import { Store } from '../src/store/Store';
 const TMDB = 'https://api.themoviedb.org';
 const OMDB = 'https://www.omdbapi.com';
 
-const movie = (externalIds: string[]): PlexItem => ({
-  ratingKey: '1',
+const movie = (externalIds: string[]): LookupItem => ({
   type: 'movie',
   title: 'Back to the Future',
-  summary: '',
-  summaryLocked: false,
   externalIds,
 });
 
