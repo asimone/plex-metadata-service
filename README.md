@@ -1,26 +1,44 @@
-# plex-metadata-service
+# plex-summary-sync
 
-A self-hosted Plex [Custom Metadata Provider](docs/MediaProvider.md) (PMS 1.43+) with per-field source priority, so no single upstream controls your summaries.
+Replaces Plex's AI-rewritten summaries with human-written ones (TVDB for TV, TMDB/OMDb for movies), writes them into Plex through its API, and locks them so refreshes don't overwrite them. Plex's own agents keep doing matching, artwork, cast, ratings and collections.
 
-**Status:** in development. v1 is a movie provider (TMDB + OMDb, with local overrides). TV on TVDB is planned for v2. See [PLAN.md](PLAN.md) for the full build plan.
+**Status:** in development. Phase 1 (read-only Plex client and dry-run listing) is in place; nothing writes to Plex yet. See [PLAN.md](PLAN.md) for the full plan.
 
-## Development
+## Setup
 
 Requires Node 22+.
 
 ```bash
 npm install
-cp .env.example .env   # add your TMDB_API_KEY
-npm run dev            # ts-node, for development
-npm test
-npm run build && npm run start:prod
+cp .env.example .env   # fill in PLEX_URL and PLEX_TOKEN
+npm run build
 ```
 
-The Plex provider spec this service implements is in [docs/](docs/).
+### Getting your Plex token
+
+In Plex Web, open any item → **⋯ → Get Info → View XML**. The URL of the page that opens ends in `X-Plex-Token=…`; copy that value into `PLEX_TOKEN`. Use the server owner's account. Treat the token like a password.
+
+## Usage
+
+```bash
+npm run cli -- libraries                       # list the server's libraries
+npm run cli -- sync --dry-run --summary-only   # per-library counts of external IDs
+npm run cli -- sync --dry-run --library Movies # every item with its IDs
+npm run cli -- sync --dry-run --json > items.jsonl
+```
+
+The dry run is read-only. It lists every movie, show, season and episode with the external IDs (`tvdb://`, `tmdb://`, `imdb://`) that Plex's agents stored, which are what summaries will be looked up by. It also flags summaries that are already locked or empty.
+
+## Development
+
+```bash
+npm test
+npm run dev -- libraries   # ts-node, no build step
+```
 
 ## Credits
 
-Built on Plex's reference implementation, [plexinc/tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider) (imported at commit `3348a89`, declared ISC in its `package.json`). The spec documents in `docs/` come from that repository.
+Started from Plex's [tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider) (imported at `3348a89`, ISC). Its TMDB client is kept under `src/sources/tmdb/`; the provider code was removed when the project became a summary sync.
 
 ## License
 

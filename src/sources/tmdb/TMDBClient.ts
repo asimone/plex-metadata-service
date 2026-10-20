@@ -4,7 +4,7 @@
  */
 
 import axios, { AxiosInstance } from 'axios';
-import logger from '../utils/logger';
+import logger from '../../utils/logger';
 import {
   TMDBTVShow,
   TMDBSeason,
@@ -14,7 +14,7 @@ import {
   TMDBConfiguration,
   TMDBAggregateCredits,
   TMDBEpisodeGroupDetails,
-} from '../types/tmdb';
+} from './types';
 
 export class TMDBClient {
   private client: AxiosInstance;

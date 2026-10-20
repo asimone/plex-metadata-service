@@ -1,8 +1,8 @@
 {
-  "name": "plex-metadata-service",
+  "name": "plex-summary-sync",
   "version": "1.0.0",
-  "description": "Self-hosted Plex Custom Metadata Provider with per-field source priority",
-  "main": "dist/server.js",
+  "description": "Replaces Plex AI-rewritten summaries with human-written ones from TVDB, TMDB and OMDb",
+  "main": "dist/cli.js",
   "license": "MIT",
   "author": "Andrew Simone",
   "engines": {
@@ -15,9 +15,8 @@
     "test:coverage": "jest --coverage",
     "build": "tsc",
     "build:watch": "tsc --watch",
-    "start": "ts-node src/server.ts",
-    "dev": "ts-node src/server.ts",
-    "start:prod": "node dist/server.js"
+    "cli": "node dist/cli.js",
+    "dev": "ts-node src/cli.ts"
   },
   "directories": {
     "doc": "docs",
@@ -27,24 +26,18 @@
   "dependencies": {
     "axios": "^1.12.2",
     "dotenv": "^17.2.3",
-    "express": "^5.1.0",
-    "swagger-jsdoc": "^6.2.8",
-    "swagger-ui-express": "^5.0.1",
     "winston": "^3.18.3"
   },
   "devDependencies": {
-    "@types/dotenv": "^6.1.1",
-    "@types/express": "^5.0.3",
     "@types/jest": "^30.0.0",
     "@types/node": "^24.7.0",
-    "@types/supertest": "^6.0.3",
-    "@types/swagger-jsdoc": "^6.0.4",
-    "@types/swagger-ui-express": "^4.1.8",
-    "@types/winston": "^2.4.4",
     "jest": "^30.2.0",
-    "supertest": "^7.1.4",
+    "nock": "^14.0.17",
     "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
+  },
+  "bin": {
+    "plex-summary-sync": "dist/cli.js"
   }
 }

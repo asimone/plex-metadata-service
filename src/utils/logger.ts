@@ -29,9 +29,10 @@ const logger = winston.createLogger({
   level: logLevel,
   levels: winston.config.npm.levels,
   transports: [
-    // Console transport for development
+    // Logs go to stderr so CLI output on stdout stays clean
     new winston.transports.Console({
       format: consoleFormat,
+      stderrLevels: Object.keys(winston.config.npm.levels),
     }),
   ],
 });
