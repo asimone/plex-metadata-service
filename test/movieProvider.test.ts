@@ -189,6 +189,11 @@ describe('GET /movie/library/metadata/:ratingKey', () => {
     await request(app()).get('/movie/library/metadata/tmdb-movie-999999').expect(404);
   });
 
+  it('answers extras requests with an empty container', async () => {
+    const res = await request(app()).get('/movie/library/metadata/tmdb-movie-105/extras?X-Plex-Container-Size=50').expect(200);
+    expect(res.body.MediaContainer).toMatchObject({ identifier: ID, size: 0, totalSize: 0, Metadata: [] });
+  });
+
   it('400s for malformed ratingKeys', async () => {
     await request(app()).get('/movie/library/metadata/bad%20key!').expect(400);
   });

@@ -43,6 +43,12 @@ export function movieRoutes(provider: MovieProvider, defaultLanguage: string): R
     }
   });
 
+  // Plex asks every primary provider for extras (trailers etc.). We have none, so answer
+  // with an empty container rather than a 404.
+  router.get('/library/metadata/:ratingKey/extras', (_req, res) => {
+    res.json(container(MOVIE_IDENTIFIER, []));
+  });
+
   router.get('/library/metadata/:ratingKey', async (req: Request, res: Response) => {
     const ratingKey = String(req.params.ratingKey);
     if (!isValidRatingKey(ratingKey)) {
