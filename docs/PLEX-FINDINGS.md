@@ -91,3 +91,23 @@ npm run cli -- list --library "TV Shows" | grep "no external IDs"
   - 6,172 would be written, 7,211 lock only, 2,984 no source summary (mostly seasons, plus legacy-agent shows without IDs).
   - **0 errors, 0 rate-limit (429) responses, no circuit trips** at 4 concurrent lookups.
 - Takeaway: TV works the same way as movies. Fix individual shows on demand with `sync --item <show ratingKey> --write`; there's no need to sweep the whole library.
+
+## Run 4 — 2026-10-20 (Phase 5, movie provider as primary)
+
+Setup: provider at `http://12.27.27.211:3000/movie` (Docker on Tufte), agent "Movies (Simone)" (primary) with Plex Movie below it, test library on the real Movies folders.
+
+**What Plex sends when matching** (`POST /movie/library/metadata/matches`):
+
+```json
+{"excludeElements":"Media","type":1,"title":"A Few Good Men","year":1992,
+ "filename":"A Few Good Men (1992)/A Few Good Men (1992) {imdb-tt0104257} [Bluray-1080p]...mkv",
+ "hash":"416c…"}
+```
+
+- `title`, `year` and `filename` (folder + file, relative to the library root). **No `guid` hint** was sent for any item.
+- Radarr's `{imdb-tt…}` filename tags reach us through `filename`, so about half the library matches **by ID**. In the first 81 matches, 39 used an ID hint.
+- The rest are matched by title search. Spot-checks were all correct, including tricky titles: *Terminator 2 Judgement Day*, *WALL·E*, *The Square (2017)*, *Total Recall (1990)*, *Ocean's Eleven (2001)*.
+- 0 failed matches, 0 errors, and every metadata response had a TMDB summary.
+
+**Calls per movie:** `POST …/matches`, then `GET …/metadata/{key}`, then `GET …/metadata/{key}/extras?X-Plex-Container-Size=50…`. Plex also sends `X-Plex-Text-Format=markdown`.
+- `/extras` isn't in the spec docs. It used to fall through to Express's HTML 404; it now returns an empty container.
