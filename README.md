@@ -18,12 +18,13 @@ Plex agent "Movies (Simone)"
   3. Plex Local Media (optional)              local posters/assets
 ```
 
-- **Matching:** Plex sends title, year, filename and sometimes an ID hint. The service uses, in order:
-  1. an ID hint from Plex (`tmdb://`, `imdb://`);
-  2. ID tags in the filename, like `{tmdb-105}` or `{imdb-tt0088763}`;
-  3. otherwise a TMDB search, ranked by exact title, year (±1 year) and popularity.
+- **Matching:** Plex sends the title, year and filename (folder + file). In practice it sends no ID hint. The service uses, in order:
+  1. ID tags in the folder or file name, like `{imdb-tt0088763}` (Radarr's default naming) or `{tmdb-105}`. These match exactly; in testing about half the library matched this way;
+  2. an ID hint (`tmdb://`, `imdb://`), if Plex ever sends one;
+  3. otherwise a TMDB search on title + year, ranked by exact title, year (±1 year) and popularity.
 
   Fix Match in Plex gets up to 10 ranked results, with posters.
+- **Calls per movie:** a match, then a metadata fetch, then a request for extras. Extras get an empty answer; trailers come from Plex Movie.
 - **Metadata:** for a matched movie it returns `ratingKey`, `guid`, title, original title, release date, year, external IDs (`imdb://`, `tmdb://`) and the **summary**: TMDB's, cleaned of HTML and source tags, or OMDb's (IMDb plot) when TMDB has none. If no source has a summary, the field is left out so Plex Movie fills it.
 - **Nothing is ever added to the text.** Source credit lives only in this README.
 - **Permanent IDs:**
@@ -40,7 +41,7 @@ Plex agent "Movies (Simone)"
 
 ## Deploy with Docker
 
-On the Docker host:
+On the Docker host (here it lives in `~/docker/plex-metadata` on Tufte):
 
 ```bash
 mkdir -p ~/docker/plex-metadata && cd ~/docker/plex-metadata
@@ -50,6 +51,15 @@ chmod 600 .env
 docker compose up -d --build
 docker ps --filter name=plex-metadata   # should show (healthy)
 ```
+
+The repo is private, so instead of cloning on the server, copy the committed code from a checkout:
+
+```bash
+git archive HEAD | ssh andrew@12.27.27.211 "tar -x -C docker/plex-metadata"
+ssh andrew@12.27.27.211 "cd docker/plex-metadata && docker compose up -d --build"
+```
+
+The server's `.env` only needs the source keys (no Plex token).
 
 - The container listens on port **3000**, and keeps its cache in `./data` (SQLite).
 - It runs as the non-root `node` user (UID 1000), so `./data` must be writable by UID 1000.
@@ -78,7 +88,14 @@ Plex Web, signed in as the server owner. Menu names below are from PMS 1.43 and 
    If the new agent doesn't appear in later menus, hard-refresh the page (Ctrl+F5). That's a known Plex Web quirk.
 3. **Try it on a test library first:** *Add Library → Movies*, point it at the **same folders** as your real Movies library, and under *Advanced* choose the **Movies (Simone)** agent. Your real library is untouched.
 4. **Check a few titles:** summaries should be TMDB's, while posters, cast and ratings come from Plex Movie. Try **Fix Match** on one to see the ranked results.
-5. **Switch the real library** when you're happy: *Edit library → Advanced → Agent → Movies (Simone)*, then *Refresh All Metadata*. Every movie rematches once onto the new provider. Then delete the test library.
+5. **Switch the real library** when you're happy:
+   1. Note the watch state of a few movies (watched, partly watched, unwatched) so you can confirm it carried over.
+   2. *Edit Library → Advanced → Agent → Movies (Simone)* → **Save**.
+   3. *Manage Library → **Refresh All Metadata***. Every movie rematches once onto the new provider.
+   4. Check the movies you noted, then **Fix Match** anything that matched wrong.
+   5. Delete the test library (*Manage Library → Delete*). That removes only Plex's entry, not your files.
+
+   For a mismatch you want fixed for good, add `{tmdb-<id>}` to the movie's folder name.
 
 **Rollback:** set the library's agent back to **Plex Movie** and refresh. Nothing in your media folders is ever modified.
 
@@ -137,7 +154,8 @@ All settings go in `.env`. See [.env.example](.env.example).
 | Symptom | Fix |
 |---|---|
 | Plex can't add the provider | From the Plex container, run `curl http://<host>:3000/movie`. Check the host IP, port 3000 and firewalls |
-| Wrong movie matched | Use **Fix Match** in Plex, or add `{tmdb-<id>}` to the folder name for a guaranteed match |
+| Wrong movie matched | Use **Fix Match** in Plex, or add `{tmdb-<id>}` (or `{imdb-tt…}`) to the folder name for a guaranteed match |
+| Want to see exactly what Plex sends | Set `LOG_LEVEL=debug` in the server's `.env` and run `docker compose up -d`. Each match request body is logged. Set it back to `info` afterwards, because a full refresh is noisy |
 | A movie has Plex's summary, not TMDB's | TMDB has no overview for it, and OMDb had none either (or isn't configured) |
 | `omdb: HTTP 401` in logs | Activate the OMDb key via the email link |
 | Container not `healthy` | Run `docker logs plex-metadata`. A missing `TMDB_API_KEY` disables `/movie` |

@@ -51,7 +51,7 @@ Everything else (art, cast, ratings, genres, content rating, studio, duration) i
 
 ## 4. Phases
 
-### Phase 4: Movie provider
+### Phase 4: Movie provider ✅
 - An Express server with `GET /movie`, `POST /movie/library/metadata/matches` and `GET /movie/library/metadata/:ratingKey`.
 - Matching:
   - `guid` hint (`tmdb://` direct, `imdb://` via `/find`), then filename tags `{tmdb-…}` / `{imdb-…}`;
@@ -61,7 +61,7 @@ Everything else (art, cast, ratings, genres, content rating, studio, duration) i
 - Log one line per request: path, ratingKey or title, and result.
 - **Done when:** contract tests pass (required fields, GUID format, 400/404), and "Back to the Future" (1985) plus `imdb://tt0088763` both match `tmdb-movie-105`.
 
-### Phase 5: Docker on Tufte and a Plex test library
+### Phase 5: Docker on Tufte and a Plex test library ✅ (movies; real library switching 2026-10-20)
 - A multi-stage Dockerfile (`node:22-slim`, non-root) with `HEALTHCHECK /health`, and compose for Tufte (port 3000, `/data` volume, env file, `restart: unless-stopped`).
 - Register `http://<tufte-ip>:3000/movie` in Plex and create a "Movies (Simone)" agent as described in section 1. Point a **test Movie library** at the same folders.
 - Record in `docs/PLEX-FINDINGS.md`:
