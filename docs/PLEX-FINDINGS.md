@@ -20,7 +20,7 @@ Results from running the read-only Phase 1 dry run against the real server. Thes
 ### Answers to PLAN.md section 5
 
 1. **Do seasons and episodes carry `tvdb://` IDs?** Yes. Items matched by Plex Series carry their **own** TVDB IDs: TVDB season IDs on seasons (e.g. `tvdb://1964999`) and TVDB episode IDs on episodes. No numbering lookup is needed for them.
-2. **Does a locked bulk `PUT` survive Refresh Metadata?** Not tested yet (Phase 2, needs writes).
+2. **Does a locked bulk `PUT` survive Refresh Metadata?** Yes. See run 2.
 3. **Does `includeGuids=1` work on the bulk listing for every type?** Yes, for movies, shows, seasons and episodes.
 
 ### What the gaps are
@@ -52,3 +52,31 @@ To list the legacy-agent or unmatched items yourself:
 ```bash
 npm run cli -- sync --dry-run --library "TV Shows" | grep "no external IDs"
 ```
+
+## Run 2 — 2026-10-20 (Phase 2, movies)
+
+### Dry run over Movies (912 items, ~46 s on a cold cache)
+
+| Outcome | Count |
+|---|---:|
+| Would write (Plex's text differs from TMDB's) | 627 |
+| Would lock only (Plex already shows TMDB's text) | 283 |
+| No source summary | 2 |
+| Errors | 0 |
+
+- **About 31% of movies already show TMDB's text verbatim.** The rest differ. Many of Plex's versions read like IMDb-style plot lines, e.g. with actor names in parentheses. Review the report at `data/dry-run-movies.txt` (git-ignored) before enabling whole-library writes.
+- The 2 with no source summary:
+  - one unmatched local item;
+  - one movie where TMDB has no overview, and OMDb rejected the key (`401`, which usually means the key isn't activated yet).
+
+### Write, refresh, restore (3 test movies)
+
+| Movie | ratingKey | Action |
+|---|---|---|
+| 2 Fast 2 Furious | 2540 | write + lock |
+| Crouching Tiger, Hidden Dragon | 5523 | write + lock |
+| 28 Days Later | 131 | lock only (text already matched) |
+
+1. `sync --item … --write`: Plex showed our text with the summary **locked**, and the next sync reported `unchanged`.
+2. **Refresh Metadata in Plex** on all three: the text and the lock both survived. A `PUT /library/sections/{id}/all … summary.locked=1` behaves like a manual edit.
+3. `restore`: Plex's original text came back, **unlocked**. The local records were removed, and the next dry run sees the items as new again (`write` / `lock`).
