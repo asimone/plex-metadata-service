@@ -2,7 +2,7 @@ import nock from 'nock';
 import request from 'supertest';
 import { readConfig } from '../src/config/env';
 import { inLanguage } from '../src/providers/tv/TvdbShows';
-import { parseTvRatingKey } from '../src/providers/tv/TvProvider';
+import { parseTvRatingKey, searchQueries } from '../src/providers/tv/TvProvider';
 import { CircuitBreaker } from '../src/resilience/circuitBreaker';
 import { HttpSource } from '../src/resilience/http';
 import { createApp } from '../src/server';
@@ -91,6 +91,14 @@ describe('helpers', () => {
     expect(parseTvRatingKey('tmdb-movie-1')).toBeUndefined();
   });
 
+  it('falls back to the main title before a subtitle', () => {
+    expect(searchQueries('Winning Time: The Rise of the Lakers Dynasty')).toEqual(['Winning Time: The Rise of the Lakers Dynasty', 'Winning Time']);
+    expect(searchQueries('Bluey - Minisodes')).toEqual(['Bluey - Minisodes', 'Bluey']);
+    expect(searchQueries('Spider-Man: The Animated Series')).toEqual(['Spider-Man: The Animated Series', 'Spider-Man']);
+    expect(searchQueries('Doctor Who')).toEqual(['Doctor Who']);
+    expect(searchQueries('X: The Show')).toEqual(['X: The Show']);
+  });
+
   it('drops non-Latin text for Latin-script languages', () => {
     expect(inLanguage('日本語のあらすじです。', 'eng')).toBeUndefined();
     expect(inLanguage('Natsuko (夏子) fights.', 'eng')).toBe('Natsuko (夏子) fights.');
@@ -136,6 +144,25 @@ describe('matching', () => {
     });
     // Only seasons that have episodes, and only aired order.
     expect(show.Children.Metadata.map((s: { ratingKey: string }) => s.ratingKey)).toEqual(['tvdb-season-447955-1']);
+  });
+
+  it('retries with the main title when TVDB finds nothing for the full title', async () => {
+    tvdbShow();
+    nock(TVDB)
+      .get('/v4/search')
+      .query({ query: 'ZENSHU: The Long Subtitle', type: 'series' })
+      .reply(200, { status: 'success', data: [] })
+      .get('/v4/search')
+      .query({ query: 'ZENSHU', type: 'series' })
+      .reply(200, {
+        status: 'success',
+        data: [
+          { tvdb_id: '1', name: 'Zenshu Other', year: '2020' },
+          { tvdb_id: '447955', name: '全修。', year: '2025', translations: { eng: 'ZENSHU: The Long Subtitle' } },
+        ],
+      });
+    const res = await match({ type: 2, title: 'ZENSHU: The Long Subtitle' }).expect(200);
+    expect(res.body.MediaContainer.Metadata[0].ratingKey).toBe('tvdb-show-447955');
   });
 
   it('uses a {tvdb-…} tag in the path without searching', async () => {
