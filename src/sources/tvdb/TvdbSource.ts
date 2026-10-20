@@ -3,12 +3,11 @@
  * Docs: https://thetvdb.github.io/v4-api/
  */
 
-import { PlexItem } from '../../plex/types';
 import { CircuitBreaker } from '../../resilience/circuitBreaker';
 import { HttpSource, NotFoundError, describeError } from '../../resilience/http';
 import { Store } from '../../store/Store';
 import { cleanSummary } from '../../text/cleanSummary';
-import { DAY_MS, SourceLookup, SummarySource, externalId } from '../SummarySource';
+import { DAY_MS, LookupItem, SourceLookup, SummarySource, externalId } from '../SummarySource';
 import { TvdbClient, TvdbEnvelope } from './TvdbClient';
 
 interface TvdbTranslation {
@@ -80,7 +79,7 @@ export class TvdbSource implements SummarySource {
     return this.client.http.breaker;
   }
 
-  async getSummary(item: PlexItem): Promise<SourceLookup> {
+  async getSummary(item: LookupItem): Promise<SourceLookup> {
     const endpoint = ENDPOINT[item.type];
     const id = externalId(item, 'tvdb');
     if (!endpoint || !id) {

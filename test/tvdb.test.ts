@@ -1,5 +1,5 @@
 import nock from 'nock';
-import { PlexItem } from '../src/plex/types';
+import { LookupItem } from '../src/sources/SummarySource';
 import { CircuitBreaker } from '../src/resilience/circuitBreaker';
 import { HttpSource } from '../src/resilience/http';
 import { TvdbSource, tvdbLanguage } from '../src/sources/tvdb/TvdbSource';
@@ -7,12 +7,9 @@ import { Store } from '../src/store/Store';
 
 const TVDB = 'https://api4.thetvdb.com';
 
-const item = (type: PlexItem['type'], externalIds: string[]): PlexItem => ({
-  ratingKey: '1',
+const item = (type: LookupItem['type'], externalIds: string[]): LookupItem => ({
   type,
   title: 'Breaking Bad',
-  summary: '',
-  summaryLocked: false,
   externalIds,
 });
 

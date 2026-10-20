@@ -4,16 +4,15 @@
  *   show    tmdb://  → /tv/{id};           tvdb:// or imdb:// → /find (tv_results)
  *   season  tvdb://  → /find (tv_season_results)
  *   episode tvdb:// or imdb:// → /find (tv_episode_results)
- * (Plex's tmdb:// on seasons and episodes is TMDB's internal ID, which TMDB can't look up directly.)
+ * (A tmdb:// ID on a season or episode is TMDB's internal ID, which TMDB can't look up directly.)
  * Docs: https://developer.themoviedb.org/reference
  */
 
-import { PlexItem, PlexItemType } from '../../plex/types';
 import { CircuitBreaker } from '../../resilience/circuitBreaker';
 import { HttpSource, NotFoundError, describeError } from '../../resilience/http';
 import { Store } from '../../store/Store';
 import { cleanSummary } from '../../text/cleanSummary';
-import { DAY_MS, SourceLookup, SummarySource, externalId } from '../SummarySource';
+import { DAY_MS, ItemType, LookupItem, SourceLookup, SummarySource, externalId } from '../SummarySource';
 
 interface TmdbOverview {
   overview?: string;
@@ -22,7 +21,7 @@ interface TmdbOverview {
 type FindKey = 'movie_results' | 'tv_results' | 'tv_season_results' | 'tv_episode_results';
 type TmdbFind = Partial<Record<FindKey, TmdbOverview[]>>;
 
-const FIND_RESULTS: Record<PlexItemType, FindKey> = {
+const FIND_RESULTS: Record<ItemType, FindKey> = {
   movie: 'movie_results',
   show: 'tv_results',
   season: 'tv_season_results',
@@ -63,7 +62,7 @@ export class TmdbSource implements SummarySource {
     return this.http.breaker;
   }
 
-  async getSummary(item: PlexItem): Promise<SourceLookup> {
+  async getSummary(item: LookupItem): Promise<SourceLookup> {
     const lookup = this.lookupFor(item);
     if (!lookup) {
       return { status: 'no-id' };
@@ -77,7 +76,7 @@ export class TmdbSource implements SummarySource {
     }
   }
 
-  private lookupFor(item: PlexItem): Lookup | undefined {
+  private lookupFor(item: LookupItem): Lookup | undefined {
     const tmdbId = externalId(item, 'tmdb');
     const tvdbId = externalId(item, 'tvdb');
     const imdbId = externalId(item, 'imdb');

@@ -1,4 +1,4 @@
-import { ItemRecord, Store } from '../src/store/Store';
+import { Store } from '../src/store/Store';
 
 describe('Store', () => {
   let now: number;
@@ -32,29 +32,4 @@ describe('Store', () => {
     expect(store.budgetUsed('omdb')).toBe(0);
   });
 
-  it('saves, reads, lists and deletes item records', () => {
-    const record: ItemRecord = {
-      ratingKey: '42',
-      sectionKey: '1',
-      type: 'movie',
-      title: 'Back to the Future',
-      plexGuid: 'plex://movie/x',
-      externalId: 'tmdb://105',
-      source: 'tmdb',
-      writtenSummary: 'Ours',
-      writtenAt: '2026-10-20T00:00:00Z',
-      originalSummary: 'Theirs',
-      originalLocked: true,
-      status: 'synced',
-    };
-    store.saveItem(record);
-    expect(store.getItem('42')).toEqual(record);
-    expect(store.allItems()).toEqual([record]);
-
-    store.saveItem({ ...record, status: 'user-owned' });
-    expect(store.getItem('42')?.status).toBe('user-owned');
-
-    store.deleteItem('42');
-    expect(store.getItem('42')).toBeUndefined();
-  });
 });

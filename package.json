@@ -1,7 +1,7 @@
 {
   "name": "plex-summary-sync",
   "version": "1.0.0",
-  "description": "Plex custom metadata providers (TV and movies) with human-written summaries, plus a CLI",
+  "description": "Plex custom metadata providers (TMDB movies, TVDB TV) with human-written summaries",
   "main": "dist/server.js",
   "license": "MIT",
   "author": "Andrew Simone",
@@ -14,11 +14,8 @@
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
     "build": "tsc",
-    "build:watch": "tsc --watch",
-    "cli": "node dist/cli.js",
-    "dev": "ts-node src/cli.ts",
     "start": "node dist/server.js",
-    "dev:server": "ts-node src/server.ts"
+    "dev": "ts-node src/server.ts"
   },
   "directories": {
     "doc": "docs",
@@ -44,8 +41,5 @@
     "ts-jest": "^29.4.4",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"
-  },
-  "bin": {
-    "plex-summary-sync": "dist/cli.js"
   }
 }

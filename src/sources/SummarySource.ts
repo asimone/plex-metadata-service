@@ -2,9 +2,17 @@
  * A source of summary text, looked up by an item's external IDs only.
  */
 
-import { PlexItem } from '../plex/types';
-
 export type SourceName = 'tmdb' | 'omdb' | 'tvdb';
+
+export type ItemType = 'movie' | 'show' | 'season' | 'episode';
+
+/** What a source needs to look an item up. */
+export interface LookupItem {
+  type: ItemType;
+  title: string;
+  /** External IDs, e.g. ["imdb://tt0088763", "tmdb://105"]. */
+  externalIds: string[];
+}
 
 export type SourceLookup =
   /** The source has a usable summary (already cleaned). */
@@ -18,11 +26,11 @@ export type SourceLookup =
 
 export interface SummarySource {
   readonly name: SourceName;
-  getSummary(item: PlexItem): Promise<SourceLookup>;
+  getSummary(item: LookupItem): Promise<SourceLookup>;
 }
 
 /** Returns the first external ID with the given scheme, without the scheme ("tmdb://105" → "105"). */
-export function externalId(item: PlexItem, scheme: string): string | undefined {
+export function externalId(item: LookupItem, scheme: string): string | undefined {
   const prefix = `${scheme}://`;
   const id = item.externalIds.find(x => x.startsWith(prefix));
   return id ? id.slice(prefix.length) : undefined;
