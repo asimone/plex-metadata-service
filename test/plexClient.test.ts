@@ -84,6 +84,46 @@ describe('PlexClient.listItems', () => {
   });
 });
 
+describe('PlexClient writes and single items', () => {
+  it('sets and locks a summary with a PUT on the section', async () => {
+    const scope = nock(URL, { reqheaders: { 'X-Plex-Token': 'secret' } })
+      .put('/library/sections/1/all')
+      .query({ type: '1', id: '42', 'summary.value': 'Marty & Doc, 1985.', 'summary.locked': '1' })
+      .reply(200);
+    await client().setSummary('1', { ratingKey: '42', type: 'movie' }, 'Marty & Doc, 1985.', true);
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it('unlocks with summary.locked=0', async () => {
+    const scope = nock(URL)
+      .put('/library/sections/2/all')
+      .query({ type: '4', id: '7', 'summary.value': 'orig', 'summary.locked': '0' })
+      .reply(200);
+    await client().setSummary('2', { ratingKey: '7', type: 'episode' }, 'orig', false);
+    expect(scope.isDone()).toBe(true);
+  });
+
+  it('fetches one item with its section', async () => {
+    nock(URL)
+      .get('/library/metadata/42')
+      .query({ includeGuids: '1' })
+      .reply(200, {
+        MediaContainer: {
+          librarySectionID: 1,
+          Metadata: [{ ratingKey: '42', type: 'movie', title: 'BTTF', librarySectionID: 1, Guid: [{ id: 'tmdb://105' }] }],
+        },
+      });
+    const found = await client().getItem('42');
+    expect(found?.sectionKey).toBe('1');
+    expect(found?.item.externalIds).toEqual(['tmdb://105']);
+  });
+
+  it('returns undefined for an unknown item', async () => {
+    nock(URL).get('/library/metadata/999').query(true).reply(404);
+    await expect(client().getItem('999')).resolves.toBeUndefined();
+  });
+});
+
 describe('toPlexItem', () => {
   it('maps external IDs, lock state and episode position', () => {
     const item = toPlexItem(

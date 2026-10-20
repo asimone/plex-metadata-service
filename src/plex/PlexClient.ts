@@ -82,6 +82,45 @@ export class PlexClient {
     }
   }
 
+  /** Fetches one item by ratingKey, with its library section. Returns undefined if Plex has no such item. */
+  async getItem(ratingKey: string): Promise<{ item: PlexItem; sectionKey: string } | undefined> {
+    type ItemContainer = RawMediaContainer<RawMetadata & { librarySectionID?: number | string }> & {
+      MediaContainer: { librarySectionID?: number | string };
+    };
+    let data: ItemContainer;
+    try {
+      data = await this.get<ItemContainer>(`/library/metadata/${encodeURIComponent(ratingKey)}`, { includeGuids: 1 });
+    } catch (error) {
+      if (error instanceof PlexError && / 404 /.test(error.message)) return undefined;
+      throw error;
+    }
+    const raw = data.MediaContainer.Metadata?.[0];
+    if (!raw) return undefined;
+    const sectionKey = String(raw.librarySectionID ?? data.MediaContainer.librarySectionID ?? '');
+    return { item: toPlexItem(raw, 'movie'), sectionKey };
+  }
+
+  /**
+   * Sets an item's summary and lock state, the same edit as "Edit → Summary" in Plex.
+   * This is the only call that writes to Plex.
+   */
+  async setSummary(sectionKey: string, item: Pick<PlexItem, 'ratingKey' | 'type'>, summary: string, locked: boolean): Promise<void> {
+    const url = `/library/sections/${encodeURIComponent(sectionKey)}/all`;
+    try {
+      logger.debug(`Plex PUT ${url}`, { ratingKey: item.ratingKey, locked });
+      await this.client.put(url, null, {
+        params: {
+          type: PlexType[item.type],
+          id: item.ratingKey,
+          'summary.value': summary,
+          'summary.locked': locked ? 1 : 0,
+        },
+      });
+    } catch (error) {
+      throw toPlexError(error, url);
+    }
+  }
+
   private async get<T>(url: string, params?: Record<string, string | number>): Promise<T> {
     try {
       logger.debug(`Plex GET ${url}`, params ? { params } : undefined);

@@ -17,7 +17,16 @@ export interface Config {
     tvdbPin: string;
     tmdbApiKey: string;
     omdbApiKey: string;
+    omdbDailyCap: number;
+    /** Summary language, e.g. "en-US". */
+    language: string;
   };
+  sync: {
+    /** Writes to Plex are allowed for whole-library syncs only when true. */
+    write: boolean;
+    writesPerSecond: number;
+  };
+  dataDir: string;
 }
 
 /**
@@ -45,8 +54,20 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): Config {
       tvdbPin: (env.TVDB_PIN || '').trim(),
       tmdbApiKey: (env.TMDB_API_KEY || '').trim(),
       omdbApiKey: (env.OMDB_API_KEY || '').trim(),
+      omdbDailyCap: positiveInt(env.OMDB_DAILY_CAP, 900),
+      language: (env.SUMMARY_LANGUAGE || 'en-US').trim(),
     },
+    sync: {
+      write: /^(1|true|yes)$/i.test((env.SYNC_WRITE || '').trim()),
+      writesPerSecond: positiveInt(env.SYNC_WRITES_PER_SECOND, 5),
+    },
+    dataDir: (env.DATA_DIR || './data').trim(),
   };
+}
+
+function positiveInt(value: string | undefined, fallback: number): number {
+  const n = parseInt((value || '').trim(), 10);
+  return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
 /**

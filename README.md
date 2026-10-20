@@ -2,7 +2,7 @@
 
 Replaces Plex's AI-rewritten summaries with human-written ones (TVDB for TV, TMDB/OMDb for movies), writes them into Plex through its API, and locks them so refreshes don't overwrite them. Plex's own agents keep doing matching, artwork, cast, ratings and collections.
 
-**Status:** in development. Phase 1 (read-only Plex client and dry-run listing) is in place; nothing writes to Plex yet. See [PLAN.md](PLAN.md) for the full plan.
+**Status:** in development. Movie sync (Phase 2) works: dry run by default, writes on request. TV comes in Phase 3. See [PLAN.md](PLAN.md).
 
 ## Setup
 
@@ -21,13 +21,23 @@ In Plex Web, open any item → **⋯ → Get Info → View XML**. The URL of the
 ## Usage
 
 ```bash
-npm run cli -- libraries                       # list the server's libraries
-npm run cli -- sync --dry-run --summary-only   # per-library counts of external IDs
-npm run cli -- sync --dry-run --library Movies # every item with its IDs
-npm run cli -- sync --dry-run --json > items.jsonl
+npm run cli -- libraries                      # list the server's libraries
+npm run cli -- list --summary-only            # external-ID coverage per library (read-only)
+npm run cli -- sync                           # DRY RUN: which summaries would change
+npm run cli -- sync --all --full              # every item, full text
+npm run cli -- show <ratingKey>               # Plex's summary vs each source, and the decision
+npm run cli -- sync --item <ratingKey> --write   # write one item
+npm run cli -- restore <ratingKey>            # put Plex's original back and unlock
 ```
 
-The dry run is read-only. It lists every movie, show, season and episode with the external IDs (`tvdb://`, `tmdb://`, `imdb://`) that Plex's agents stored, which are what summaries will be looked up by. It also flags summaries that are already locked or empty.
+**How a sync decides, per item:**
+- Look up a summary by ID: TMDB (`tmdb://`, or `imdb://` via /find), then OMDb (`imdb://`). Never by title.
+- If it differs from Plex's, write it and **lock** the field (the same as editing it in Plex). If it's the same, just lock it.
+- If no source has one, leave Plex's alone.
+- If a summary is locked and isn't what this tool last wrote, someone edited it in Plex: it's left alone for good.
+- Plex's original text is saved locally (`DATA_DIR`) before the first write, so `restore` (or `restore --all`) undoes everything.
+
+**Writes are opt-in:** `sync` is a dry run unless you add `--write`. Whole-library writes also need `SYNC_WRITE=true` in `.env`; single items (`--item`) don't.
 
 ## Development
 
@@ -38,7 +48,7 @@ npm run dev -- libraries   # ts-node, no build step
 
 ## Credits
 
-Started from Plex's [tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider) (imported at `3348a89`, ISC). Its TMDB client is kept under `src/sources/tmdb/`; the provider code was removed when the project became a summary sync.
+Started from Plex's [tmdb-example-provider](https://github.com/plexinc/tmdb-example-provider) (imported at `3348a89`, ISC). Its TypeScript, test and logging setup carried over; the provider code was removed when the project became a summary sync.
 
 ## License
 
