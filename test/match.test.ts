@@ -41,6 +41,12 @@ describe('ranking', () => {
     expect(ranked.map(r => r.year)).toEqual([1984, 2021, 2024]);
   });
 
+  it('treats titles that differ only in spacing as exact', () => {
+    expect(scoreCandidate({ title: 'OJ Made in America' }, { title: 'O.J.: Made in America' })).toBeGreaterThanOrEqual(100);
+    expect(scoreCandidate({ title: 'SWAT' }, { title: 'S.W.A.T.' })).toBeGreaterThanOrEqual(100);
+    expect(scoreCandidate({ title: 'Made in America' }, { title: 'O.J.: Made in America' })).toBeLessThan(100);
+  });
+
   it('accepts an off-by-one year and matches original titles', () => {
     expect(scoreCandidate({ title: 'Amelie', year: 2002 }, { title: 'Amélie', year: 2001 })).toBeGreaterThan(110);
     expect(scoreCandidate({ title: 'Le Fabuleux Destin d’Amélie Poulain' }, { title: 'Amélie', originalTitle: 'Le Fabuleux Destin d’Amélie Poulain' })).toBeGreaterThanOrEqual(100);

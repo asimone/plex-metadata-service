@@ -20,12 +20,13 @@ import { TmdbSource } from './sources/tmdb/TmdbSource';
 import { TvdbClient } from './sources/tvdb/TvdbClient';
 import { TvdbSource } from './sources/tvdb/TvdbSource';
 import { TvProvider } from './providers/tv/TvProvider';
+import { TmdbShows } from './providers/tv/TmdbShows';
 import { TvdbShows } from './providers/tv/TvdbShows';
 import { tvRoutes } from './providers/tv/tvRoutes';
 import { Store } from './store/Store';
 import logger from './utils/logger';
 
-export function createApp(config: Config, store: Store, deps: { tmdbMovies?: TmdbMovies; tvdbClient?: TvdbClient } = {}): Express {
+export function createApp(config: Config, store: Store, deps: { tmdbMovies?: TmdbMovies; tmdbShows?: TmdbShows; tvdbClient?: TvdbClient } = {}): Express {
   const app = express();
   app.use(express.json());
   app.use((req, _res, next) => {
@@ -51,7 +52,9 @@ export function createApp(config: Config, store: Store, deps: { tmdbMovies?: Tmd
   }
 
   if (tvdbClient) {
-    const tv = new TvProvider(new TvdbShows(tvdbClient, store), sources);
+    // TMDB covers shows TVDB doesn't list; without a TMDB key the provider stays TVDB-only.
+    const tmdbShows = deps.tmdbShows ?? (config.sources.tmdbApiKey ? new TmdbShows(config.sources.tmdbApiKey, store) : undefined);
+    const tv = new TvProvider(new TvdbShows(tvdbClient, store), sources, tmdbShows);
     app.use('/tv', tvRoutes(tv, config.sources.language));
   } else {
     logger.warn('TVDB_API_KEY not set: the TV provider (/tv) is disabled');

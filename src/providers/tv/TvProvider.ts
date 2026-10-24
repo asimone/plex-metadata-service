@@ -1,7 +1,7 @@
 /**
  * The TV metadata provider: shows, seasons and episodes (types 2, 3, 4), backed by TVDB in
- * aired order. Returns identity, titles, numbering, dates, external IDs and summaries;
- * Plex Series fills artwork, cast, ratings and the rest.
+ * aired order, with TMDB as the fallback for shows TVDB doesn't list. Returns identity, titles,
+ * numbering, dates, external IDs and summaries; Plex Series fills artwork, cast, ratings and the rest.
  */
 
 import { SourceName, SummarySource } from '../../sources/SummarySource';
@@ -10,7 +10,8 @@ import { tvdbLanguage } from '../../sources/tvdb/TvdbSource';
 import { cleanSummary } from '../../text/cleanSummary';
 import logger from '../../utils/logger';
 import { MetadataTypeName, ProviderMetadata, buildGuid, compact, metadataKey, yearOf } from '../common';
-import { idHints, rank, yearFromFilename } from '../match';
+import { Candidate, idHints, scoreCandidate, yearFromFilename } from '../match';
+import { TmdbShows } from './TmdbShows';
 import { Episode, Show, ShowSeason, TvdbSearchResult, TvdbShows } from './TvdbShows';
 
 export const TV_IDENTIFIER = 'tv.plex.agents.custom.simone.tv';
@@ -36,10 +37,26 @@ export interface TvMatchRequest {
   includeChildren?: boolean;
 }
 
+/** Where a show's data comes from. TVDB keys are unchanged; TMDB keys are for shows TVDB lacks. */
+export type ShowSource = 'tvdb' | 'tmdb';
+
+interface ShowRef {
+  source: ShowSource;
+  id: string;
+}
+
 type Parsed =
-  | { type: 'show'; showId: string }
-  | { type: 'season'; showId: string; season: number }
-  | { type: 'episode'; episodeId: string };
+  | { type: 'show'; source: ShowSource; showId: string }
+  | { type: 'season'; source: ShowSource; showId: string; season: number }
+  | { type: 'episode'; source: 'tvdb'; episodeId: string }
+  // TMDB has no episode → show lookup, so its episode keys carry the show and numbers.
+  | { type: 'episode'; source: 'tmdb'; showId: string; season: number; episode: number };
+
+/**
+ * A TVDB title match scoring at least this (an exact title, or a near-exact one in the right year)
+ * is trusted without asking TMDB.
+ */
+const CONFIDENT_SCORE = 90;
 
 /**
  * Search queries to try in order: the title as given, then the part before a subtitle separator
@@ -53,23 +70,27 @@ export function searchQueries(title: string): string[] {
 }
 
 export function parseTvRatingKey(ratingKey: string): Parsed | undefined {
-  let m = /^tvdb-show-(\d+)$/.exec(ratingKey);
-  if (m) return { type: 'show', showId: m[1] };
-  m = /^tvdb-season-(\d+)-(\d+)$/.exec(ratingKey);
-  if (m) return { type: 'season', showId: m[1], season: parseInt(m[2], 10) };
+  let m = /^(tvdb|tmdb)-show-(\d+)$/.exec(ratingKey);
+  if (m) return { type: 'show', source: m[1] as ShowSource, showId: m[2] };
+  m = /^(tvdb|tmdb)-season-(\d+)-(\d+)$/.exec(ratingKey);
+  if (m) return { type: 'season', source: m[1] as ShowSource, showId: m[2], season: parseInt(m[3], 10) };
   m = /^tvdb-episode-(\d+)$/.exec(ratingKey);
-  if (m) return { type: 'episode', episodeId: m[1] };
+  if (m) return { type: 'episode', source: 'tvdb', episodeId: m[1] };
+  m = /^tmdb-episode-(\d+)-(\d+)-(\d+)$/.exec(ratingKey);
+  if (m) return { type: 'episode', source: 'tmdb', showId: m[1], season: parseInt(m[2], 10), episode: parseInt(m[3], 10) };
   return undefined;
 }
 
-const showKey = (id: number | string) => `tvdb-show-${id}`;
-const seasonKey = (showId: number | string, n: number) => `tvdb-season-${showId}-${n}`;
-const episodeKey = (id: number | string) => `tvdb-episode-${id}`;
+const showKey = (source: ShowSource, id: number | string) => `${source}-show-${id}`;
+const seasonKey = (source: ShowSource, showId: number | string, n: number) => `${source}-season-${showId}-${n}`;
+const episodeKey = (b: Bundle, e: Episode) =>
+  b.source === 'tvdb' ? `tvdb-episode-${e.id}` : `tmdb-episode-${b.show.id}-${e.seasonNumber}-${e.number}`;
 const guidFor = (type: MetadataTypeName, ratingKey: string) => buildGuid(TV_IDENTIFIER, type, ratingKey);
 const seasonTitle = (n: number) => (n === 0 ? 'Specials' : `Season ${n}`);
 
 /** A show with its episodes loaded, the unit every TV response is built from. */
 interface Bundle {
+  source: ShowSource;
   show: Show;
   episodes: Episode[];
   /** Seasons that actually have episodes, in order. */
@@ -80,7 +101,9 @@ export class TvProvider {
   constructor(
     private readonly tvdb: TvdbShows,
     /** Summary fallbacks (TMDB) and the TVDB season source, per Plex language. */
-    private readonly sourcesFor: (language: string) => Map<SourceName, SummarySource>
+    private readonly sourcesFor: (language: string) => Map<SourceName, SummarySource>,
+    /** Shows TVDB doesn't list. Without it the provider is TVDB-only. */
+    private readonly tmdb?: TmdbShows
   ) {}
 
   // ---------- metadata ----------
@@ -90,13 +113,18 @@ export class TvProvider {
     if (!parsed) return undefined;
 
     if (parsed.type === 'episode') {
+      if (parsed.source === 'tmdb') {
+        const bundle = await this.bundle({ source: 'tmdb', id: parsed.showId }, ctx);
+        const episode = bundle?.episodes.find(e => e.seasonNumber === parsed.season && e.number === parsed.episode);
+        return bundle && episode ? this.episodeMeta(bundle, episode, ctx) : undefined;
+      }
       const showId = await this.tvdb.seriesIdForEpisode(parsed.episodeId);
-      const bundle = showId ? await this.bundle(showId, ctx) : undefined;
+      const bundle = showId ? await this.bundle({ source: 'tvdb', id: showId }, ctx) : undefined;
       const episode = bundle?.episodes.find(e => String(e.id) === parsed.episodeId);
       return bundle && episode ? this.episodeMeta(bundle, episode, ctx) : undefined;
     }
 
-    const bundle = await this.bundle(parsed.showId, ctx);
+    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx);
     if (!bundle) return undefined;
 
     if (parsed.type === 'show') {
@@ -122,7 +150,7 @@ export class TvProvider {
   async children(ratingKey: string, ctx: TvContext, start: number, size: number): Promise<{ items: ProviderMetadata[]; total: number } | undefined> {
     const parsed = parseTvRatingKey(ratingKey);
     if (!parsed || parsed.type === 'episode') return undefined;
-    const bundle = await this.bundle(parsed.showId, ctx);
+    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx);
     if (!bundle) return undefined;
 
     if (parsed.type === 'show') {
@@ -138,7 +166,7 @@ export class TvProvider {
   async grandchildren(ratingKey: string, ctx: TvContext, start: number, size: number): Promise<{ items: ProviderMetadata[]; total: number } | undefined> {
     const parsed = parseTvRatingKey(ratingKey);
     if (!parsed || parsed.type !== 'show') return undefined;
-    const bundle = await this.bundle(parsed.showId, ctx);
+    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx);
     if (!bundle) return undefined;
     return {
       items: await this.episodesMeta(bundle, bundle.episodes.slice(start, start + size), ctx),
@@ -152,19 +180,18 @@ export class TvProvider {
     const showTitle = req.type === 2 ? req.title : req.type === 3 ? req.parentTitle : req.grandparentTitle;
     const year = req.type === 2 ? (req.year ?? yearFromFilename(req.filename)) : undefined;
     const limit = req.manual && req.type === 2 ? 10 : 1;
-    const lang = tvdbLanguage(ctx.language);
 
-    const candidates = await this.findShows(showTitle, year, req.guid, req.filename, lang, limit);
-    logger.info(`tv match (type ${req.type}): ${showTitle ?? '?'} ${year ? `(${year}) ` : ''}→ ${candidates.map(c => `tvdb ${c}`).join(', ') || 'no match'}`);
+    const candidates = await this.findShows(showTitle, year, req.guid, req.filename, ctx, limit);
+    logger.info(`tv match (type ${req.type}): ${showTitle ?? '?'} ${year ? `(${year}) ` : ''}→ ${candidates.map(c => `${c.source} ${c.id}`).join(', ') || 'no match'}`);
     if (candidates.length === 0) return [];
 
     if (req.type === 2) {
       if (candidates.length === 1) {
-        const meta = await this.metadata(showKey(candidates[0]), ctx, req.includeChildren);
+        const meta = await this.metadata(showKey(candidates[0].source, candidates[0].id), ctx, req.includeChildren);
         return meta ? [meta] : [];
       }
       // Manual search: one show record per candidate, no children.
-      const metas = await Promise.all(candidates.map(id => this.metadata(showKey(id), ctx)));
+      const metas = await Promise.all(candidates.map(c => this.metadata(showKey(c.source, c.id), ctx)));
       return metas.filter((m): m is ProviderMetadata => Boolean(m));
     }
 
@@ -174,7 +201,7 @@ export class TvProvider {
     if (req.type === 3) {
       const season = bundle.seasons.find(s => s.number === req.index);
       if (!season) return [];
-      const meta = await this.metadata(seasonKey(bundle.show.id, season.number), ctx, req.includeChildren);
+      const meta = await this.metadata(seasonKey(bundle.source, bundle.show.id, season.number), ctx, req.includeChildren);
       return meta ? [meta] : [];
     }
 
@@ -187,16 +214,56 @@ export class TvProvider {
     return episode ? [await this.episodeMeta(bundle, episode, ctx)] : [];
   }
 
-  /** TVDB series IDs for a show, best first: ID hints (guid / filename tags), then title search. */
-  private async findShows(title: string | undefined, year: number | undefined, guid: string | undefined, filename: string | undefined, lang: string, limit: number): Promise<string[]> {
+  /**
+   * Shows for a match, best first: ID hints (guid / filename tags), then TVDB title search, then
+   * TMDB for shows TVDB doesn't list. TVDB wins whenever it has the show, so existing matches and
+   * Sonarr's numbering are unchanged.
+   */
+  private async findShows(
+    title: string | undefined,
+    year: number | undefined,
+    guid: string | undefined,
+    filename: string | undefined,
+    ctx: TvContext,
+    limit: number
+  ): Promise<ShowRef[]> {
     const hints = idHints(guid, filename);
-    if (hints.tvdb) return [hints.tvdb];
+    if (hints.tvdb) return [{ source: 'tvdb', id: hints.tvdb }];
     if (hints.imdb) {
       const id = await this.tvdb.seriesIdForImdb(hints.imdb);
-      if (id) return [id];
+      if (id) return [{ source: 'tvdb', id }];
+      const tmdbId = await this.tmdb?.showIdForImdb(hints.imdb, ctx.language);
+      if (tmdbId) return [await this.preferTvdb(tmdbId, ctx)];
     }
+    if (hints.tmdb && (await this.tmdb?.show(hints.tmdb, ctx.language))) return [await this.preferTvdb(hints.tmdb, ctx)];
     if (!title) return [];
 
+    const wanted = { title, year };
+    const byScore = (a: { score: number }, b: { score: number }) => b.score - a.score;
+    const tvdbHits = (await this.searchTvdb(title, year, tvdbLanguage(ctx.language)))
+      .map(r => ({ ref: { source: 'tvdb', id: r.tvdbId } as ShowRef, score: scoreCandidate(wanted, r) }))
+      .sort(byScore);
+    const best = tvdbHits[0]?.score ?? -Infinity;
+    if (!this.tmdb || (limit === 1 && best >= CONFIDENT_SCORE)) return tvdbHits.slice(0, limit).map(h => h.ref);
+
+    const tmdbHits = (await this.searchTmdb(title, year, ctx.language))
+      .map(r => ({ ref: { source: 'tmdb', id: r.tmdbId } as ShowRef, score: scoreCandidate(wanted, r) }))
+      .sort(byScore);
+    if (limit === 1) {
+      const top = tmdbHits[0];
+      return top && top.score > best ? [await this.preferTvdb(top.ref.id, ctx)] : tvdbHits.slice(0, 1).map(h => h.ref);
+    }
+    // Manual search: both lists by score; the sort is stable, so TVDB comes first on ties.
+    return [...tvdbHits, ...tmdbHits].sort(byScore).slice(0, limit).map(h => h.ref);
+  }
+
+  /** A TMDB show, or its TVDB entry when TMDB knows one (TVDB numbering matches Sonarr). */
+  private async preferTvdb(tmdbId: string, ctx: TvContext): Promise<ShowRef> {
+    const show = await this.tmdb?.show(tmdbId, ctx.language);
+    return show?.tvdbId ? { source: 'tvdb', id: show.tvdbId } : { source: 'tmdb', id: tmdbId };
+  }
+
+  private async searchTvdb(title: string, year: number | undefined, lang: string): Promise<Array<TvdbSearchResult & Candidate>> {
     // TVDB's search often finds nothing for long titles with subtitles (e.g. "Winning Time: The Rise
     // of the Lakers Dynasty"), so fall back to the main title. Ranking still uses the full title.
     let results: TvdbSearchResult[] = [];
@@ -205,31 +272,49 @@ export class TvProvider {
       if (results.length === 0 && year) results = await this.tvdb.search(query, lang);
       if (results.length > 0) break;
     }
-    const ranked = rank(
-      { title, year },
-      results.map((r: TvdbSearchResult) => ({ ...r, title: r.translatedName ?? r.name, originalTitle: r.name, alternateTitles: r.aliases }))
-    );
-    return ranked.slice(0, limit).map(r => r.tvdbId);
+    return results.map(r => ({ ...r, title: r.translatedName ?? r.name, originalTitle: r.name, alternateTitles: r.aliases }));
+  }
+
+  private async searchTmdb(title: string, year: number | undefined, language: string): Promise<Array<Candidate & { tmdbId: string }>> {
+    if (!this.tmdb) return [];
+    let results: Awaited<ReturnType<TmdbShows['search']>> = [];
+    for (const query of searchQueries(title)) {
+      results = await this.tmdb.search(query, language, year);
+      if (results.length === 0 && year) results = await this.tmdb.search(query, language);
+      if (results.length > 0) break;
+    }
+    return results.map(r => ({ tmdbId: r.tmdbId, title: r.name, originalTitle: r.originalName, year: r.year, popularity: r.popularity }));
   }
 
   // ---------- building responses ----------
 
-  private async bundle(showId: string, ctx: TvContext): Promise<Bundle | undefined> {
-    const lang = tvdbLanguage(ctx.language);
-    const show = await this.tvdb.show(showId, lang);
-    if (!show) return undefined;
-    const episodes = (await this.tvdb.episodes(showId, lang)).sort((a, b) => a.seasonNumber - b.seasonNumber || a.number - b.number);
+  private async bundle(ref: ShowRef, ctx: TvContext): Promise<Bundle | undefined> {
+    let show: Show | undefined;
+    let episodes: Episode[];
+    if (ref.source === 'tmdb') {
+      show = await this.tmdb?.show(ref.id, ctx.language);
+      if (!show) return undefined;
+      episodes = await this.tmdb!.episodes(show, ctx.language);
+    } else {
+      const lang = tvdbLanguage(ctx.language);
+      show = await this.tvdb.show(ref.id, lang);
+      if (!show) return undefined;
+      episodes = await this.tvdb.episodes(ref.id, lang);
+    }
+    episodes.sort((a, b) => a.seasonNumber - b.seasonNumber || a.number - b.number);
     const withEpisodes = new Set(episodes.map(e => e.seasonNumber));
-    return { show, episodes, seasons: show.seasons.filter(s => withEpisodes.has(s.number)) };
+    return { source: ref.source, show, episodes, seasons: show.seasons.filter(s => withEpisodes.has(s.number)) };
   }
 
   private async showMeta(b: Bundle, ctx: TvContext): Promise<ProviderMetadata> {
     const { show } = b;
-    const ratingKey = showKey(show.id);
-    const externalIds = [`tvdb://${show.id}`, show.imdbId && `imdb://${show.imdbId}`, show.tmdbId && `tmdb://${show.tmdbId}`].filter(
-      (x): x is string => Boolean(x)
-    );
-    const summary = await this.summary('show', show.title, cleanSummary(show.overview), externalIds, ctx, ['tvdb']);
+    const ratingKey = showKey(b.source, show.id);
+    const externalIds = (
+      b.source === 'tvdb'
+        ? [`tvdb://${show.id}`, show.imdbId && `imdb://${show.imdbId}`, show.tmdbId && `tmdb://${show.tmdbId}`]
+        : [`tmdb://${show.id}`, show.imdbId && `imdb://${show.imdbId}`, show.tvdbId && `tvdb://${show.tvdbId}`]
+    ).filter((x): x is string => Boolean(x));
+    const summary = await this.summary('show', show.title, cleanSummary(show.overview), externalIds, ctx, [b.source]);
     return compact({
       ratingKey,
       key: `${metadataKey(ratingKey)}/children`,
@@ -246,12 +331,17 @@ export class TvProvider {
 
   private async seasonMeta(b: Bundle, season: ShowSeason, ctx: TvContext): Promise<ProviderMetadata> {
     const { show } = b;
-    const ratingKey = seasonKey(show.id, season.number);
+    const ratingKey = seasonKey(b.source, show.id, season.number);
+    const showRatingKey = showKey(b.source, show.id);
     const first = b.episodes.find(e => e.seasonNumber === season.number && e.aired)?.aired;
-    // TVDB only lists season overviews it has; skip the lookup otherwise (most seasons have none).
-    const summary = season.hasOverview
-      ? await this.summary('season', show.title, undefined, [`tvdb://${season.id}`], ctx)
-      : undefined;
+    // TMDB returns season overviews with the show. TVDB only lists the ones it has; skip the
+    // lookup otherwise (most seasons have none).
+    const summary =
+      b.source === 'tmdb'
+        ? cleanSummary(season.overview)
+        : season.hasOverview
+          ? await this.summary('season', show.title, undefined, [`tvdb://${season.id}`], ctx)
+          : undefined;
     return compact({
       ratingKey,
       key: `${metadataKey(ratingKey)}/children`,
@@ -262,11 +352,11 @@ export class TvProvider {
       originallyAvailableAt: first,
       year: yearOf(first),
       summary,
-      parentRatingKey: showKey(show.id),
-      parentKey: metadataKey(showKey(show.id)),
-      parentGuid: guidFor('show', showKey(show.id)),
+      parentRatingKey: showRatingKey,
+      parentKey: metadataKey(showRatingKey),
+      parentGuid: guidFor('show', showRatingKey),
       parentTitle: show.title,
-      Guid: [{ id: `tvdb://${season.id}` }],
+      Guid: [{ id: `${b.source}://${season.id}` }],
     });
   }
 
@@ -276,9 +366,10 @@ export class TvProvider {
 
   private async episodeMeta(b: Bundle, e: Episode, ctx: TvContext): Promise<ProviderMetadata> {
     const { show } = b;
-    const ratingKey = episodeKey(e.id);
-    const sKey = seasonKey(show.id, e.seasonNumber);
-    const summary = await this.summary('episode', show.title, cleanSummary(e.overview), [`tvdb://${e.id}`], ctx, ['tvdb']);
+    const ratingKey = episodeKey(b, e);
+    const sKey = seasonKey(b.source, show.id, e.seasonNumber);
+    const showRatingKey = showKey(b.source, show.id);
+    const summary = await this.summary('episode', show.title, cleanSummary(e.overview), [`${b.source}://${e.id}`], ctx, [b.source]);
     return compact({
       ratingKey,
       key: metadataKey(ratingKey),
@@ -294,11 +385,11 @@ export class TvProvider {
       parentKey: metadataKey(sKey),
       parentGuid: guidFor('season', sKey),
       parentTitle: seasonTitle(e.seasonNumber),
-      grandparentRatingKey: showKey(show.id),
-      grandparentKey: metadataKey(showKey(show.id)),
-      grandparentGuid: guidFor('show', showKey(show.id)),
+      grandparentRatingKey: showRatingKey,
+      grandparentKey: metadataKey(showRatingKey),
+      grandparentGuid: guidFor('show', showRatingKey),
       grandparentTitle: show.title,
-      Guid: [{ id: `tvdb://${e.id}` }],
+      Guid: [{ id: `${b.source}://${e.id}` }],
     });
   }
 

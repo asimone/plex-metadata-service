@@ -9,7 +9,7 @@ Custom metadata providers for Plex (Plex Media Server 1.43+) that replace Plex's
 | Provider name in Plex | URL | Library type | Source |
 |---|---|---|---|
 | **TMDB Movies** | `http://<host>:3000/movie` | Movies | TMDB (OMDb as a summary fallback) |
-| **TVDB TV Shows** | `http://<host>:3000/tv` | TV Shows | TVDB, in aired order (TMDB as a summary fallback) |
+| **TVDB TV Shows** | `http://<host>:3000/tv` | TV Shows | TVDB, in aired order; TMDB for shows TVDB doesn't list (and as a summary fallback) |
 
 Each provider is the **primary** source of its own Plex agent. It matches your files and supplies titles, dates, numbering, IDs and summaries. Plex's own agent sits underneath and fills in everything else: posters, cast, ratings, genres. Plex calls the service on its own whenever it matches or refreshes something, so there's nothing to schedule.
 
@@ -25,7 +25,7 @@ Each provider is the **primary** source of its own Plex agent. It matches your f
 
 | Key | Used for | Required |
 |---|---|---|
-| `TMDB_API_KEY` | TMDB Movies provider; TV summary fallback | Yes, for movies |
+| `TMDB_API_KEY` | TMDB Movies provider; TV shows TVDB doesn't list; TV summary fallback | Yes, for movies |
 | `TVDB_API_KEY` | TVDB TV Shows provider | Yes, for TV |
 | `OMDB_API_KEY` | Movie summary fallback (IMDb plots) | Optional |
 
@@ -148,6 +148,7 @@ From then on, **new items** are matched and described by the provider. Existing 
 - **ID tags in folder names give exact matches.** Movies: `{imdb-tt0088763}` or `{tmdb-105}`; Radarr adds `{imdb-…}` by default. Shows: `{tvdb-81189}` or `[tvdb-81189]`; Sonarr can add these. Without a tag, the provider searches by title and year.
 - **Wrong match?** Use **⋯ → Fix Match**. You get up to 10 ranked results with posters. Adding an ID tag to the folder makes it permanent.
 - **TV numbering** follows TVDB's aired order, the same numbering Sonarr uses.
+- **Shows TVDB doesn't list** (some documentaries and miniseries) are matched from TMDB instead, when TVDB has no confident match for the title and year or the hint is a TMDB/IMDb ID TVDB doesn't know. TVDB always wins when it has the show.
 
 ### Undo
 Set the library's agent back to **Plex Movie** / **Plex Series** and refresh. Nothing in your media folders is ever modified.
@@ -158,7 +159,7 @@ All settings go in `.env` next to `docker-compose.yml`. Apply changes with `dock
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `TMDB_API_KEY` | — | Enables TMDB Movies; TMDB summary fallback for TV |
+| `TMDB_API_KEY` | — | Enables TMDB Movies; TMDB fallback for TV shows TVDB doesn't list, and for TV summaries |
 | `TVDB_API_KEY`, `TVDB_PIN` | — | Enables TVDB TV Shows |
 | `OMDB_API_KEY` | — | Optional movie summary fallback |
 | `OMDB_DAILY_CAP` | `900` | Daily limit on OMDb calls |
