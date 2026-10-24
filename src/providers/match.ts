@@ -70,7 +70,10 @@ export interface Candidate {
 export function scoreCandidate(wanted: { title: string; year?: number }, c: Candidate): number {
   const want = normalizeTitle(wanted.title);
   const titles = [c.title, c.originalTitle, ...(c.alternateTitles ?? [])].filter((t): t is string => Boolean(t)).map(normalizeTitle);
-  let score = titles.includes(want) ? 100 : Math.max(0, ...titles.map(t => tokenOverlap(want, t))) * 60;
+  // Spacing alone doesn't make titles different: "O.J." normalizes to "o j", "OJ" to "oj".
+  const squash = (t: string) => t.replace(/ /g, '');
+  const exact = titles.some(t => t === want || squash(t) === squash(want));
+  let score = exact ? 100 : Math.max(0, ...titles.map(t => tokenOverlap(want, t))) * 60;
 
   if (wanted.year && c.year) {
     const diff = Math.abs(wanted.year - c.year);

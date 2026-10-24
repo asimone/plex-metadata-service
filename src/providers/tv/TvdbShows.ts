@@ -25,6 +25,8 @@ export interface ShowSeason {
   number: number;
   /** TVDB has an overview for this season in the requested language. */
   hasOverview: boolean;
+  /** The overview itself, when the source returns it with the show (TMDB). */
+  overview?: string;
 }
 
 export interface Show {
@@ -37,6 +39,8 @@ export interface Show {
   firstAired?: string;
   imdbId?: string;
   tmdbId?: string;
+  /** Set on TMDB shows that TMDB knows a TVDB ID for. */
+  tvdbId?: string;
   seasons: ShowSeason[];
 }
 
