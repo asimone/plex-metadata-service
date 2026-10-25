@@ -38,6 +38,8 @@ export function tvRoutes(provider: TvProvider, defaultLanguage: string): Router 
       grandparentTitle: str(body.grandparentTitle),
       year: num(body.year),
       guid: str(body.guid),
+      parentGuid: str(body.parentGuid),
+      grandparentGuid: str(body.grandparentGuid),
       filename: str(body.filename),
       index: num(body.index),
       parentIndex: num(body.parentIndex),
@@ -46,7 +48,7 @@ export function tvRoutes(provider: TvProvider, defaultLanguage: string): Router 
       includeChildren: flag(body.includeChildren),
     };
     const showTitle = type === 2 ? match.title : type === 3 ? match.parentTitle : match.grandparentTitle;
-    if (!showTitle && !match.guid && !match.filename) {
+    if (!showTitle && !match.guid && !match.parentGuid && !match.grandparentGuid && !match.filename) {
       return res.status(400).json({ error: 'Match needs a show title, guid or filename' });
     }
     if (type === 3 && match.index === undefined) {

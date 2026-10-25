@@ -3,7 +3,7 @@ import request from 'supertest';
 import { readConfig } from '../src/config/env';
 import { TmdbShows } from '../src/providers/tv/TmdbShows';
 import { inLanguage } from '../src/providers/tv/TvdbShows';
-import { parseTvRatingKey, searchQueries, seasonTypeFor } from '../src/providers/tv/TvProvider';
+import { parseTvRatingKey, searchQueries, seasonTypeFor, showRefFromGuid } from '../src/providers/tv/TvProvider';
 import { CircuitBreaker } from '../src/resilience/circuitBreaker';
 import { HttpSource } from '../src/resilience/http';
 import { createApp } from '../src/server';
@@ -559,5 +559,72 @@ describe('episode ordering (Plex "Episode ordering" setting)', () => {
     tvdbBebop();
     const show = (await get('tvdb-show-76885?includeChildren=1&episodeOrder=tvdbRegional')).body.MediaContainer.Metadata[0];
     expect(show.Children.size).toBe(0);
+  });
+});
+
+describe('seasons and episodes of a show that shares its title', () => {
+  // TVDB lists the 2021 live-action remake first for a bare "Cowboy Bebop"; only the year tells them apart.
+  const remake = { tvdb_id: '367234', name: 'Cowboy Bebop', year: '2021' };
+  const anime = { tvdb_id: '76885', name: 'Cowboy Bebop', year: '1998' };
+  const show = {
+    id: 76885,
+    name: 'Cowboy Bebop',
+    year: '1998',
+    originalLanguage: 'eng',
+    overview: 'Bounty hunters in space.',
+    seasons: [{ id: 1001, number: 1, type: { type: 'official' }, overviewTranslations: [] }],
+    translations: { nameTranslations: [], overviewTranslations: [] },
+  };
+  const aired = [{ id: 302, seasonNumber: 1, number: 1, name: 'Stray Dog Strut', aired: '1998-04-03', overview: 'Stray Dog Strut overview.' }];
+  function tvdbAnime() {
+    nock(TVDB)
+      .persist()
+      .post('/v4/login')
+      .reply(200, { status: 'success', data: { token: 'tok' } })
+      .get('/v4/series/76885/extended')
+      .query(true)
+      .reply(200, { status: 'success', data: show })
+      .get('/v4/series/76885/episodes/default/eng')
+      .query(true)
+      .reply(200, { status: 'success', data: { episodes: aired }, links: { next: null } });
+  }
+
+  it('reads our own show and season guids', () => {
+    expect(showRefFromGuid(`${ID}://show/tvdb-show-76885`)).toEqual({ source: 'tvdb', id: '76885' });
+    expect(showRefFromGuid(`${ID}://season/tvdb-season-76885-1-dvd`)).toEqual({ source: 'tvdb', id: '76885' });
+    expect(showRefFromGuid(`${ID}://show/tmdb-show-66738`)).toEqual({ source: 'tmdb', id: '66738' });
+    expect(showRefFromGuid(`${ID}://episode/tvdb-episode-302`)).toBeUndefined();
+    expect(showRefFromGuid('tvdb://76885')).toBeUndefined();
+    expect(showRefFromGuid(undefined)).toBeUndefined();
+  });
+
+  it('matches a season by the year in its folder name', async () => {
+    tvdbAnime();
+    nock(TVDB)
+      .get('/v4/search')
+      .query({ query: 'Cowboy Bebop', type: 'series', year: '1998' })
+      .reply(200, { status: 'success', data: [remake, anime] });
+    const res = await match({ type: 3, parentTitle: 'Cowboy Bebop', filename: 'Cowboy Bebop (1998)/Season 01/x.mkv', index: 1 }).expect(200);
+    expect(res.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1', parentRatingKey: 'tvdb-show-76885' });
+  });
+
+  it('matches an episode by the year in its file name', async () => {
+    tvdbAnime();
+    nock(TVDB)
+      .get('/v4/search')
+      .query({ query: 'Cowboy Bebop', type: 'series', year: '1998' })
+      .reply(200, { status: 'success', data: [remake, anime] });
+    const res = await match({ type: 4, grandparentTitle: 'Cowboy Bebop', filename: 'Cowboy Bebop (1998) - S01E01.mkv', parentIndex: 1, index: 1 }).expect(200);
+    expect(res.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-302', grandparentRatingKey: 'tvdb-show-76885' });
+  });
+
+  it('keeps seasons and episodes on the show Plex already matched, without searching', async () => {
+    tvdbAnime(); // no search is mocked: a title search would fail the request
+    const season = await match({ type: 3, parentTitle: 'Cowboy Bebop', parentGuid: `${ID}://show/tvdb-show-76885`, index: 1 }).expect(200);
+    expect(season.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1' });
+    const episode = await match({ type: 4, grandparentTitle: 'Cowboy Bebop', grandparentGuid: `${ID}://show/tvdb-show-76885`, parentIndex: 1, index: 1 }).expect(200);
+    expect(episode.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-302' });
+    const viaGuid = await match({ type: 3, parentTitle: 'Cowboy Bebop', guid: `${ID}://show/tvdb-show-76885`, index: 1 }).expect(200);
+    expect(viaGuid.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1' });
   });
 });

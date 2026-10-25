@@ -58,6 +58,10 @@ export interface TvMatchRequest {
   grandparentTitle?: string;
   year?: number;
   guid?: string;
+  /** For seasons: the show Plex has already matched, e.g. our own `…://show/tvdb-show-76885`. */
+  parentGuid?: string;
+  /** For episodes: the show Plex has already matched. */
+  grandparentGuid?: string;
   filename?: string;
   index?: number;
   parentIndex?: number;
@@ -112,6 +116,14 @@ export function parseTvRatingKey(ratingKey: string): Parsed | undefined {
   m = /^tmdb-episode-(\d+)-(\d+)-(\d+)$/.exec(ratingKey);
   if (m) return { type: 'episode', source: 'tmdb', showId: m[1], season: parseInt(m[2], 10), episode: parseInt(m[3], 10) };
   return undefined;
+}
+
+/** The show one of our own guids points at (a show's or a season's), or undefined for any other guid. */
+export function showRefFromGuid(guid?: string): ShowRef | undefined {
+  const prefix = `${TV_IDENTIFIER}://`;
+  if (!guid?.startsWith(prefix)) return undefined;
+  const parsed = parseTvRatingKey(guid.slice(prefix.length).replace(/^(show|season)\//, ''));
+  return parsed && parsed.type !== 'episode' ? { source: parsed.source, id: parsed.showId } : undefined;
 }
 
 const showKey = (source: ShowSource, id: number | string) => `${source}-show-${id}`;
@@ -214,10 +226,14 @@ export class TvProvider {
 
   async match(req: TvMatchRequest, ctx: TvContext): Promise<ProviderMetadata[]> {
     const showTitle = req.type === 2 ? req.title : req.type === 3 ? req.parentTitle : req.grandparentTitle;
-    const year = req.type === 2 ? (req.year ?? yearFromFilename(req.filename)) : undefined;
+    // A season's or episode's year isn't the show's, so only the folder name's year counts for them.
+    // Without it, a bare title like "Cowboy Bebop" goes to the more popular 2021 remake.
+    const year = req.type === 2 ? (req.year ?? yearFromFilename(req.filename)) : yearFromFilename(req.filename);
     const limit = req.manual && req.type === 2 ? 10 : 1;
 
-    const candidates = await this.findShows(showTitle, year, req.guid, req.filename, ctx, limit);
+    // A season or episode of a show Plex has already matched to us belongs to that show: no search.
+    const known = req.type === 2 ? undefined : showRefFromGuid(req.parentGuid ?? req.grandparentGuid ?? req.guid);
+    const candidates = known ? [known] : await this.findShows(showTitle, year, req.guid, req.filename, ctx, limit);
     logger.info(`tv match (type ${req.type}): ${showTitle ?? '?'} ${year ? `(${year}) ` : ''}→ ${candidates.map(c => `${c.source} ${c.id}`).join(', ') || 'no match'}`);
     if (candidates.length === 0) return [];
 
