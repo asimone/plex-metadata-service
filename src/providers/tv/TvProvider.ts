@@ -345,6 +345,14 @@ export class TvProvider {
       if (!show) return undefined;
       seasons = type === 'official' ? show.seasons : (show.seasonsByType?.[type] ?? []);
       episodes = type === 'official' ? await this.tvdb.episodes(ref.id, lang) : seasons.length ? await this.tvdb.episodes(ref.id, lang, type) : [];
+      if (type !== 'official' && seasons.length) {
+        // Specials keep aired numbering in every order: special-episode file names follow it (Sonarr
+        // uses aired order), and other orders often renumber or reshuffle season 0.
+        const aired = await this.tvdb.episodes(ref.id, lang);
+        episodes = [...episodes.filter(e => e.seasonNumber !== 0), ...aired.filter(e => e.seasonNumber === 0)];
+        const specials = show.seasons.find(s => s.number === 0);
+        seasons = [...(specials ? [specials] : []), ...seasons.filter(s => s.number !== 0)];
+      }
     }
     episodes.sort((a, b) => a.seasonNumber - b.seasonNumber || a.number - b.number);
     const withEpisodes = new Set(episodes.map(e => e.seasonNumber));

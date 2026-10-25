@@ -458,16 +458,21 @@ describe('episode ordering (Plex "Episode ordering" setting)', () => {
     originalLanguage: 'eng',
     overview: 'Bounty hunters in space.',
     seasons: [
+      { id: 1000, number: 0, type: { type: 'official' }, overviewTranslations: [] },
       { id: 1001, number: 1, type: { type: 'official' }, overviewTranslations: [] },
+      { id: 2000, number: 0, type: { type: 'dvd' }, overviewTranslations: [] },
       { id: 2001, number: 1, type: { type: 'dvd' }, overviewTranslations: [] },
     ],
     translations: { nameTranslations: [], overviewTranslations: [] },
   };
+  // Specials differ between the orders, as TVDB's DVD order renumbers them.
   const aired = [
+    { id: 401, seasonNumber: 0, number: 1, name: 'The Movie', aired: '2001-09-01', overview: 'The Movie overview.' },
     { id: 302, seasonNumber: 1, number: 1, name: 'Stray Dog Strut', aired: '1998-04-03', overview: 'Stray Dog Strut overview.' },
     { id: 301, seasonNumber: 1, number: 2, name: 'Asteroid Blues', aired: '1998-10-23', overview: 'Asteroid Blues overview.' },
   ];
   const dvd = [
+    { id: 402, seasonNumber: 0, number: 1, name: 'Mish-Mash Blues', aired: '2001-01-01', overview: 'Extra overview.' },
     { id: 301, seasonNumber: 1, number: 1, name: 'Asteroid Blues', aired: '1998-10-23', overview: 'Asteroid Blues overview.' },
     { id: 302, seasonNumber: 1, number: 2, name: 'Stray Dog Strut', aired: '1998-04-03', overview: 'Stray Dog Strut overview.' },
   ];
@@ -514,7 +519,7 @@ describe('episode ordering (Plex "Episode ordering" setting)', () => {
   it('keeps aired order (and its keys) when no order is requested', async () => {
     tvdbBebop();
     const show = (await get('tvdb-show-76885?includeChildren=1')).body.MediaContainer.Metadata[0];
-    expect(show.Children.Metadata.map((s: { ratingKey: string }) => s.ratingKey)).toEqual(['tvdb-season-76885-1']);
+    expect(show.Children.Metadata.map((s: { ratingKey: string }) => s.ratingKey)).toEqual(['tvdb-season-76885-0', 'tvdb-season-76885-1']);
     const eps = (await get('tvdb-season-76885-1/children')).body.MediaContainer.Metadata;
     expect(eps.map((e: { ratingKey: string; index: number; title: string }) => [e.ratingKey, e.index, e.title])).toEqual([
       ['tvdb-episode-302', 1, 'Stray Dog Strut'],
@@ -527,8 +532,12 @@ describe('episode ordering (Plex "Episode ordering" setting)', () => {
     const show = (await get('tvdb-show-76885?includeChildren=1&episodeOrder=tvdbDvd')).body.MediaContainer.Metadata[0];
     expect(show.ratingKey).toBe('tvdb-show-76885');
     expect(show.Children.Metadata.map((s: { ratingKey: string; Guid: unknown }) => [s.ratingKey, s.Guid])).toEqual([
+      ['tvdb-season-76885-0-dvd', [{ id: 'tvdb://1000' }]],
       ['tvdb-season-76885-1-dvd', [{ id: 'tvdb://2001' }]],
     ]);
+    // Specials keep aired numbering in DVD order.
+    const specials = (await get('tvdb-season-76885-0-dvd/children')).body.MediaContainer.Metadata;
+    expect(specials.map((e: { ratingKey: string; index: number; title: string }) => [e.ratingKey, e.index, e.title])).toEqual([['tvdb-episode-401', 1, 'The Movie']]);
     const eps = (await get('tvdb-season-76885-1-dvd/children')).body.MediaContainer.Metadata;
     expect(eps.map((e: { ratingKey: string; index: number; title: string; parentRatingKey: string }) => [e.ratingKey, e.index, e.title, e.parentRatingKey])).toEqual([
       ['tvdb-episode-301', 1, 'Asteroid Blues', 'tvdb-season-76885-1-dvd'],
