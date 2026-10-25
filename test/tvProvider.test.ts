@@ -618,7 +618,26 @@ describe('seasons and episodes of a show that shares its title', () => {
     expect(res.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-302', grandparentRatingKey: 'tvdb-show-76885' });
   });
 
-  it('keeps seasons and episodes on the show Plex already matched, without searching', async () => {
+  it("uses the show's guid Plex sends with a season or episode, without searching", async () => {
+    tvdbAnime(); // no search is mocked: a title search would fail the request
+    // The body Plex sent for a Cowboy Bebop (1998) season, as logged.
+    const season = await match({ type: 3, parentTitle: 'Cowboy Bebop', parentYear: 1998, parentGuid: 'tvdb://76885', index: 1, includeChildren: 1 }).expect(200);
+    expect(season.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1', parentRatingKey: 'tvdb-show-76885' });
+    const episode = await match({ type: 4, grandparentTitle: 'Cowboy Bebop', grandparentYear: 1998, grandparentGuid: 'tvdb://76885', parentIndex: 1, index: 1 }).expect(200);
+    expect(episode.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-302' });
+  });
+
+  it("matches a season by the show's year Plex sends", async () => {
+    tvdbAnime();
+    nock(TVDB)
+      .get('/v4/search')
+      .query({ query: 'Cowboy Bebop', type: 'series', year: '1998' })
+      .reply(200, { status: 'success', data: [remake, anime] });
+    const res = await match({ type: 3, parentTitle: 'Cowboy Bebop', parentYear: 1998, index: 1 }).expect(200);
+    expect(res.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1' });
+  });
+
+  it('keeps seasons and episodes on a show Plex matched to us, without searching', async () => {
     tvdbAnime(); // no search is mocked: a title search would fail the request
     const season = await match({ type: 3, parentTitle: 'Cowboy Bebop', parentGuid: `${ID}://show/tvdb-show-76885`, index: 1 }).expect(200);
     expect(season.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-season-76885-1' });

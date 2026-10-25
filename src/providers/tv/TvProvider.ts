@@ -58,10 +58,14 @@ export interface TvMatchRequest {
   grandparentTitle?: string;
   year?: number;
   guid?: string;
-  /** For seasons: the show Plex has already matched, e.g. our own `…://show/tvdb-show-76885`. */
+  /** For seasons: the show's guid, as Plex knows it (`tvdb://76885`, or one of ours). */
   parentGuid?: string;
-  /** For episodes: the show Plex has already matched. */
+  /** For seasons: the show's year. */
+  parentYear?: number;
+  /** For episodes: the show's guid. */
   grandparentGuid?: string;
+  /** For episodes: the show's year. */
+  grandparentYear?: number;
   filename?: string;
   index?: number;
   parentIndex?: number;
@@ -226,14 +230,17 @@ export class TvProvider {
 
   async match(req: TvMatchRequest, ctx: TvContext): Promise<ProviderMetadata[]> {
     const showTitle = req.type === 2 ? req.title : req.type === 3 ? req.parentTitle : req.grandparentTitle;
-    // A season's or episode's year isn't the show's, so only the folder name's year counts for them.
-    // Without it, a bare title like "Cowboy Bebop" goes to the more popular 2021 remake.
-    const year = req.type === 2 ? (req.year ?? yearFromFilename(req.filename)) : yearFromFilename(req.filename);
+    // For seasons and episodes Plex sends the show's guid and year as parent/grandparent fields
+    // (`year` is the season's or episode's own). Without them, a bare title like "Cowboy Bebop"
+    // goes to the more popular 2021 remake.
+    const showGuid = req.type === 3 ? req.parentGuid : req.type === 4 ? req.grandparentGuid : undefined;
+    const showYear = req.type === 3 ? req.parentYear : req.type === 4 ? req.grandparentYear : req.year;
+    const year = showYear ?? yearFromFilename(req.filename);
     const limit = req.manual && req.type === 2 ? 10 : 1;
 
     // A season or episode of a show Plex has already matched to us belongs to that show: no search.
-    const known = req.type === 2 ? undefined : showRefFromGuid(req.parentGuid ?? req.grandparentGuid ?? req.guid);
-    const candidates = known ? [known] : await this.findShows(showTitle, year, req.guid, req.filename, ctx, limit);
+    const known = req.type === 2 ? undefined : showRefFromGuid(showGuid ?? req.guid);
+    const candidates = known ? [known] : await this.findShows(showTitle, year, showGuid ?? req.guid, req.filename, ctx, limit);
     logger.info(`tv match (type ${req.type}): ${showTitle ?? '?'} ${year ? `(${year}) ` : ''}→ ${candidates.map(c => `${c.source} ${c.id}`).join(', ') || 'no match'}`);
     if (candidates.length === 0) return [];
 
