@@ -12,7 +12,11 @@ const DEFAULT_PAGE_SIZE = 20;
 
 export function tvRoutes(provider: TvProvider, defaultLanguage: string): Router {
   const router = Router();
-  const ctx = (req: Request): TvContext => ({ language: plexParam(req, 'X-Plex-Language') ?? defaultLanguage });
+  const ctx = (req: Request): TvContext => ({
+    language: plexParam(req, 'X-Plex-Language') ?? defaultLanguage,
+    // Plex's per-show "Episode ordering": a query parameter on metadata requests, in the body on matches.
+    episodeOrder: plexParam(req, 'episodeOrder') ?? (typeof req.body?.episodeOrder === 'string' ? req.body.episodeOrder : undefined),
+  });
 
   router.get('/', (_req, res) => {
     res.json(providerDefinition(TV_IDENTIFIER, TV_TITLE, VERSION, ['show', 'season', 'episode']));

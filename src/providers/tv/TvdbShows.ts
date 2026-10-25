@@ -41,7 +41,10 @@ export interface Show {
   tmdbId?: string;
   /** Set on TMDB shows that TMDB knows a TVDB ID for. */
   tvdbId?: string;
+  /** Seasons in aired ("official") order. */
   seasons: ShowSeason[];
+  /** Seasons per TVDB season type ("official", "dvd", "absolute", "alternate", "regional"). TVDB shows only. */
+  seasonsByType?: Record<string, ShowSeason[]>;
 }
 
 export interface Episode {
@@ -143,13 +146,17 @@ export class TvdbShows {
     return raw ? toShow(raw, lang) : undefined;
   }
 
-  /** Every episode of a show in aired order, in the requested language. */
-  async episodes(seriesId: string, lang: string): Promise<Episode[]> {
-    const raw = await this.cached(`tvdbs:episodes:${seriesId}:${lang}`, DAY_MS, async () => {
+  /**
+   * Every episode of a show in the requested language, numbered by a TVDB season type: "default"
+   * (aired order) unless another type ("dvd", "absolute", "alternate", "regional") is asked for.
+   */
+  async episodes(seriesId: string, lang: string, seasonType = 'default'): Promise<Episode[]> {
+    const key = seasonType === 'default' ? `tvdbs:episodes:${seriesId}:${lang}` : `tvdbs:episodes:${seriesId}:${seasonType}:${lang}`;
+    const raw = await this.cached(key, DAY_MS, async () => {
       const all: RawEpisode[] = [];
       for (let page = 0; page < 20; page++) {
         const r = await this.client.get<TvdbEnvelope<{ episodes?: RawEpisode[] }>>(
-          `/series/${encodeURIComponent(seriesId)}/episodes/default/${lang}`,
+          `/series/${encodeURIComponent(seriesId)}/episodes/${encodeURIComponent(seasonType)}/${lang}`,
           { page }
         );
         all.push(...(r.data?.episodes ?? []));
@@ -196,10 +203,13 @@ function toShow(raw: RawSeries, lang: string): Show {
   const overview = raw.translations?.overviewTranslations?.find(o => o.language === lang)?.overview;
   const remote = (source: string) => raw.remoteIds?.find(r => (r.sourceName ?? '').toLowerCase().includes(source))?.id;
 
-  const seasons = (raw.seasons ?? [])
-    .filter(s => (s.type?.type ?? 'official') === 'official')
-    .map(s => ({ id: s.id, number: s.number, hasOverview: (s.overviewTranslations ?? []).includes(lang) }))
-    .sort((a, b) => a.number - b.number);
+  const seasonsByType: Record<string, ShowSeason[]> = {};
+  for (const s of raw.seasons ?? []) {
+    const type = s.type?.type ?? 'official';
+    (seasonsByType[type] ??= []).push({ id: s.id, number: s.number, hasOverview: (s.overviewTranslations ?? []).includes(lang) });
+  }
+  for (const list of Object.values(seasonsByType)) list.sort((a, b) => a.number - b.number);
+  const seasons = seasonsByType.official ?? [];
 
   return {
     id: raw.id,
@@ -211,6 +221,7 @@ function toShow(raw: RawSeries, lang: string): Show {
     imdbId: remote('imdb'),
     tmdbId: remote('themoviedb'),
     seasons,
+    seasonsByType,
   };
 }
 

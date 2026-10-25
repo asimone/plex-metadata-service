@@ -3,7 +3,7 @@ import request from 'supertest';
 import { readConfig } from '../src/config/env';
 import { TmdbShows } from '../src/providers/tv/TmdbShows';
 import { inLanguage } from '../src/providers/tv/TvdbShows';
-import { parseTvRatingKey, searchQueries } from '../src/providers/tv/TvProvider';
+import { parseTvRatingKey, searchQueries, seasonTypeFor } from '../src/providers/tv/TvProvider';
 import { CircuitBreaker } from '../src/resilience/circuitBreaker';
 import { HttpSource } from '../src/resilience/http';
 import { createApp } from '../src/server';
@@ -446,5 +446,109 @@ describe('TMDB fallback for shows TVDB does not list', () => {
       .reply(200, { results: [{ id: 66738, name: 'O.J.: Made in America', first_air_date: '2016-06-11' }] });
     const res = await match({ type: 2, title: 'O.J.: Made in America', year: 2016, manual: 1 }).expect(200);
     expect(res.body.MediaContainer.Metadata.map((m: { ratingKey: string }) => m.ratingKey)).toEqual(['tmdb-show-66738', 'tvdb-show-314131']);
+  });
+});
+
+describe('episode ordering (Plex "Episode ordering" setting)', () => {
+  // Aired order follows the original broadcast; DVD order is the order the show is usually watched in.
+  const bebop = {
+    id: 76885,
+    name: 'Cowboy Bebop',
+    year: '1998',
+    originalLanguage: 'eng',
+    overview: 'Bounty hunters in space.',
+    seasons: [
+      { id: 1001, number: 1, type: { type: 'official' }, overviewTranslations: [] },
+      { id: 2001, number: 1, type: { type: 'dvd' }, overviewTranslations: [] },
+    ],
+    translations: { nameTranslations: [], overviewTranslations: [] },
+  };
+  const aired = [
+    { id: 302, seasonNumber: 1, number: 1, name: 'Stray Dog Strut', aired: '1998-04-03', overview: 'Stray Dog Strut overview.' },
+    { id: 301, seasonNumber: 1, number: 2, name: 'Asteroid Blues', aired: '1998-10-23', overview: 'Asteroid Blues overview.' },
+  ];
+  const dvd = [
+    { id: 301, seasonNumber: 1, number: 1, name: 'Asteroid Blues', aired: '1998-10-23', overview: 'Asteroid Blues overview.' },
+    { id: 302, seasonNumber: 1, number: 2, name: 'Stray Dog Strut', aired: '1998-04-03', overview: 'Stray Dog Strut overview.' },
+  ];
+  function tvdbBebop() {
+    nock(TVDB)
+      .persist()
+      .post('/v4/login')
+      .reply(200, { status: 'success', data: { token: 'tok' } })
+      .get('/v4/series/76885/extended')
+      .query(true)
+      .reply(200, { status: 'success', data: bebop })
+      .get('/v4/series/76885/episodes/default/eng')
+      .query(true)
+      .reply(200, { status: 'success', data: { episodes: aired }, links: { next: null } })
+      .get('/v4/series/76885/episodes/dvd/eng')
+      .query(true)
+      .reply(200, { status: 'success', data: { episodes: dvd }, links: { next: null } })
+      .get(/\/v4\/episodes\/30[12]$/)
+      .reply(200, { status: 'success', data: { seriesId: 76885 } });
+  }
+  const get = (path: string) => request(app()).get(`/tv/library/metadata/${path}`).expect(200);
+
+  it('parses season keys that carry an order', () => {
+    expect(parseTvRatingKey('tvdb-season-76885-1-dvd')).toEqual({ type: 'season', source: 'tvdb', showId: '76885', season: 1, order: 'dvd' });
+    expect(parseTvRatingKey('tvdb-season-76885-1')).toEqual({ type: 'season', source: 'tvdb', showId: '76885', season: 1 });
+    expect(parseTvRatingKey('tvdb-season-76885-1-netflix')).toBeUndefined();
+    expect(seasonTypeFor('tvdbDvd')).toBe('dvd');
+    expect(seasonTypeFor(undefined)).toBe('official');
+    expect(seasonTypeFor('somethingElse')).toBe('official');
+  });
+
+  it('advertises the orders TVDB has for a show', async () => {
+    tvdbBebop();
+    const show = (await get('tvdb-show-76885')).body.MediaContainer.Metadata[0];
+    expect(show.SeasonType).toEqual([
+      { id: 'tvdbAiring', source: 'tvdb', tag: 'Aired', title: 'TheTVDB (Aired)' },
+      { id: 'tvdbDvd', source: 'tvdb', tag: 'DVD', title: 'TheTVDB (DVD)' },
+    ]);
+    tvdbShow();
+    const zenshu = (await get('tvdb-show-447955')).body.MediaContainer.Metadata[0];
+    expect(zenshu.SeasonType.map((t: { id: string }) => t.id)).toEqual(['tvdbAiring', 'tvdbAbsolute']);
+  });
+
+  it('keeps aired order (and its keys) when no order is requested', async () => {
+    tvdbBebop();
+    const show = (await get('tvdb-show-76885?includeChildren=1')).body.MediaContainer.Metadata[0];
+    expect(show.Children.Metadata.map((s: { ratingKey: string }) => s.ratingKey)).toEqual(['tvdb-season-76885-1']);
+    const eps = (await get('tvdb-season-76885-1/children')).body.MediaContainer.Metadata;
+    expect(eps.map((e: { ratingKey: string; index: number; title: string }) => [e.ratingKey, e.index, e.title])).toEqual([
+      ['tvdb-episode-302', 1, 'Stray Dog Strut'],
+      ['tvdb-episode-301', 2, 'Asteroid Blues'],
+    ]);
+  });
+
+  it('serves seasons and episodes in DVD order, keeping episode keys', async () => {
+    tvdbBebop();
+    const show = (await get('tvdb-show-76885?includeChildren=1&episodeOrder=tvdbDvd')).body.MediaContainer.Metadata[0];
+    expect(show.ratingKey).toBe('tvdb-show-76885');
+    expect(show.Children.Metadata.map((s: { ratingKey: string; Guid: unknown }) => [s.ratingKey, s.Guid])).toEqual([
+      ['tvdb-season-76885-1-dvd', [{ id: 'tvdb://2001' }]],
+    ]);
+    const eps = (await get('tvdb-season-76885-1-dvd/children')).body.MediaContainer.Metadata;
+    expect(eps.map((e: { ratingKey: string; index: number; title: string; parentRatingKey: string }) => [e.ratingKey, e.index, e.title, e.parentRatingKey])).toEqual([
+      ['tvdb-episode-301', 1, 'Asteroid Blues', 'tvdb-season-76885-1-dvd'],
+      ['tvdb-episode-302', 2, 'Stray Dog Strut', 'tvdb-season-76885-1-dvd'],
+    ]);
+    const episode = (await get('tvdb-episode-301?episodeOrder=tvdbDvd')).body.MediaContainer.Metadata[0];
+    expect(episode).toMatchObject({ index: 1, parentIndex: 1, parentRatingKey: 'tvdb-season-76885-1-dvd', title: 'Asteroid Blues' });
+  });
+
+  it('matches episodes by number in the requested order', async () => {
+    tvdbBebop();
+    const dvdMatch = await match({ type: 4, grandparentTitle: 'x', filename: '{tvdb-76885}/e.mkv', parentIndex: 1, index: 1, episodeOrder: 'tvdbDvd' }).expect(200);
+    expect(dvdMatch.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-301', title: 'Asteroid Blues', index: 1 });
+    const airedMatch = await match({ type: 4, grandparentTitle: 'x', filename: '{tvdb-76885}/e.mkv', parentIndex: 1, index: 1, episodeOrder: 'tvdbAiring' }).expect(200);
+    expect(airedMatch.body.MediaContainer.Metadata[0]).toMatchObject({ ratingKey: 'tvdb-episode-302', title: 'Stray Dog Strut' });
+  });
+
+  it('returns no seasons for an order the show does not have', async () => {
+    tvdbBebop();
+    const show = (await get('tvdb-show-76885?includeChildren=1&episodeOrder=tvdbRegional')).body.MediaContainer.Metadata[0];
+    expect(show.Children.size).toBe(0);
   });
 });
