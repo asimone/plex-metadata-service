@@ -147,7 +147,7 @@ From then on, **new items** are matched and described by the provider. Existing 
 ### Matching tips
 - **ID tags in folder names give exact matches.** Movies: `{imdb-tt0088763}` or `{tmdb-105}`; Radarr adds `{imdb-…}` by default. Shows: `{tvdb-81189}` or `[tvdb-81189]`; Sonarr can add these. Without a tag, the provider searches by title and year.
 - **Wrong match?** Use **⋯ → Fix Match**. You get up to 10 ranked results with posters. Adding an ID tag to the folder makes it permanent.
-- **TV numbering** follows TVDB's aired order, the same numbering Sonarr uses.
+- **TV numbering** follows TVDB's aired order by default, the same numbering Sonarr uses. If a show's files follow another order (e.g. DVD order for *Cowboy Bebop* or *Star Trek*), pick it in Plex under the show's **Edit → Advanced → Episode ordering**. The provider offers the orders TVDB has for that show: Aired, DVD, Absolute, Alternate, Regional.
 - **Shows TVDB doesn't list** (some documentaries and miniseries) are matched from TMDB instead, when TVDB has no confident match for the title and year or the hint is a TMDB/IMDb ID TVDB doesn't know. TVDB always wins when it has the show.
 
 ### Undo

@@ -20,6 +20,35 @@ export const TV_TITLE = 'TVDB TV Shows';
 export interface TvContext {
   /** Plex's language tag, e.g. "en-US". */
   language: string;
+  /** Plex's per-show "Episode ordering" (a SeasonType id such as "tvdbDvd"); aired order when unset. */
+  episodeOrder?: string;
+}
+
+/**
+ * Episode orders, as Plex SeasonType ids mapped to TVDB season types. Aired ("official") is the
+ * default; the others are offered per show when TVDB has seasons of that type.
+ */
+const ORDERS = [
+  { id: 'tvdbAiring', type: 'official', tag: 'Aired' },
+  { id: 'tvdbDvd', type: 'dvd', tag: 'DVD' },
+  { id: 'tvdbAbsolute', type: 'absolute', tag: 'Absolute' },
+  { id: 'tvdbAlternate', type: 'alternate', tag: 'Alternate' },
+  { id: 'tvdbRegional', type: 'regional', tag: 'Regional' },
+] as const;
+
+/** The TVDB season type for a Plex episodeOrder; aired order for unknown or missing values. */
+export function seasonTypeFor(episodeOrder?: string): string {
+  return ORDERS.find(o => o.id === episodeOrder)?.type ?? 'official';
+}
+
+/** The orders a TVDB show offers, for Plex's "Episode ordering" setting. Aired is always listed. */
+function seasonTypes(show: Show): ProviderMetadata['SeasonType'] {
+  return ORDERS.filter(o => o.type === 'official' || (show.seasonsByType?.[o.type]?.length ?? 0) > 0).map(o => ({
+    id: o.id,
+    source: 'tvdb',
+    tag: o.tag,
+    title: `TheTVDB (${o.tag})`,
+  }));
 }
 
 export interface TvMatchRequest {
@@ -47,7 +76,8 @@ interface ShowRef {
 
 type Parsed =
   | { type: 'show'; source: ShowSource; showId: string }
-  | { type: 'season'; source: ShowSource; showId: string; season: number }
+  // Seasons in a non-aired order carry it ("tvdb-season-1-2-dvd"): their episodes differ.
+  | { type: 'season'; source: ShowSource; showId: string; season: number; order?: string }
   | { type: 'episode'; source: 'tvdb'; episodeId: string }
   // TMDB has no episode → show lookup, so its episode keys carry the show and numbers.
   | { type: 'episode'; source: 'tmdb'; showId: string; season: number; episode: number };
@@ -72,8 +102,11 @@ export function searchQueries(title: string): string[] {
 export function parseTvRatingKey(ratingKey: string): Parsed | undefined {
   let m = /^(tvdb|tmdb)-show-(\d+)$/.exec(ratingKey);
   if (m) return { type: 'show', source: m[1] as ShowSource, showId: m[2] };
-  m = /^(tvdb|tmdb)-season-(\d+)-(\d+)$/.exec(ratingKey);
-  if (m) return { type: 'season', source: m[1] as ShowSource, showId: m[2], season: parseInt(m[3], 10) };
+  m = /^(tvdb|tmdb)-season-(\d+)-(\d+)(?:-(dvd|absolute|alternate|regional))?$/.exec(ratingKey);
+  if (m) {
+    const season = { type: 'season' as const, source: m[1] as ShowSource, showId: m[2], season: parseInt(m[3], 10) };
+    return m[4] ? { ...season, order: m[4] } : season;
+  }
   m = /^tvdb-episode-(\d+)$/.exec(ratingKey);
   if (m) return { type: 'episode', source: 'tvdb', episodeId: m[1] };
   m = /^tmdb-episode-(\d+)-(\d+)-(\d+)$/.exec(ratingKey);
@@ -82,15 +115,18 @@ export function parseTvRatingKey(ratingKey: string): Parsed | undefined {
 }
 
 const showKey = (source: ShowSource, id: number | string) => `${source}-show-${id}`;
-const seasonKey = (source: ShowSource, showId: number | string, n: number) => `${source}-season-${showId}-${n}`;
+const seasonKey = (b: Bundle, n: number) => `${b.source}-season-${b.show.id}-${n}${b.order === 'official' ? '' : `-${b.order}`}`;
+// Episode keys don't depend on the order, so switching a show's ordering keeps its episodes (and watch history).
 const episodeKey = (b: Bundle, e: Episode) =>
   b.source === 'tvdb' ? `tvdb-episode-${e.id}` : `tmdb-episode-${b.show.id}-${e.seasonNumber}-${e.number}`;
 const guidFor = (type: MetadataTypeName, ratingKey: string) => buildGuid(TV_IDENTIFIER, type, ratingKey);
 const seasonTitle = (n: number) => (n === 0 ? 'Specials' : `Season ${n}`);
 
-/** A show with its episodes loaded, the unit every TV response is built from. */
+/** A show with its episodes loaded in one episode order, the unit every TV response is built from. */
 interface Bundle {
   source: ShowSource;
+  /** TVDB season type the episodes are numbered by ("official" = aired; always "official" for TMDB). */
+  order: string;
   show: Show;
   episodes: Episode[];
   /** Seasons that actually have episodes, in order. */
@@ -124,7 +160,7 @@ export class TvProvider {
       return bundle && episode ? this.episodeMeta(bundle, episode, ctx) : undefined;
     }
 
-    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx);
+    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx, parsed.type === 'season' ? (parsed.order ?? 'official') : undefined);
     if (!bundle) return undefined;
 
     if (parsed.type === 'show') {
@@ -150,7 +186,7 @@ export class TvProvider {
   async children(ratingKey: string, ctx: TvContext, start: number, size: number): Promise<{ items: ProviderMetadata[]; total: number } | undefined> {
     const parsed = parseTvRatingKey(ratingKey);
     if (!parsed || parsed.type === 'episode') return undefined;
-    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx);
+    const bundle = await this.bundle({ source: parsed.source, id: parsed.showId }, ctx, parsed.type === 'season' ? (parsed.order ?? 'official') : undefined);
     if (!bundle) return undefined;
 
     if (parsed.type === 'show') {
@@ -201,7 +237,7 @@ export class TvProvider {
     if (req.type === 3) {
       const season = bundle.seasons.find(s => s.number === req.index);
       if (!season) return [];
-      const meta = await this.metadata(seasonKey(bundle.source, bundle.show.id, season.number), ctx, req.includeChildren);
+      const meta = await this.metadata(seasonKey(bundle, season.number), ctx, req.includeChildren);
       return meta ? [meta] : [];
     }
 
@@ -288,22 +324,31 @@ export class TvProvider {
 
   // ---------- building responses ----------
 
-  private async bundle(ref: ShowRef, ctx: TvContext): Promise<Bundle | undefined> {
+  /**
+   * A show with its episodes in one order: `order` (a TVDB season type, from a season key) wins,
+   * else the request's episodeOrder, else aired. TMDB shows are always in aired order. An order the
+   * show doesn't have yields no seasons, as the spec asks.
+   */
+  private async bundle(ref: ShowRef, ctx: TvContext, order?: string): Promise<Bundle | undefined> {
     let show: Show | undefined;
     let episodes: Episode[];
+    let seasons: ShowSeason[];
+    const type = ref.source === 'tmdb' ? 'official' : (order ?? seasonTypeFor(ctx.episodeOrder));
     if (ref.source === 'tmdb') {
       show = await this.tmdb?.show(ref.id, ctx.language);
       if (!show) return undefined;
       episodes = await this.tmdb!.episodes(show, ctx.language);
+      seasons = show.seasons;
     } else {
       const lang = tvdbLanguage(ctx.language);
       show = await this.tvdb.show(ref.id, lang);
       if (!show) return undefined;
-      episodes = await this.tvdb.episodes(ref.id, lang);
+      seasons = type === 'official' ? show.seasons : (show.seasonsByType?.[type] ?? []);
+      episodes = type === 'official' ? await this.tvdb.episodes(ref.id, lang) : seasons.length ? await this.tvdb.episodes(ref.id, lang, type) : [];
     }
     episodes.sort((a, b) => a.seasonNumber - b.seasonNumber || a.number - b.number);
     const withEpisodes = new Set(episodes.map(e => e.seasonNumber));
-    return { source: ref.source, show, episodes, seasons: show.seasons.filter(s => withEpisodes.has(s.number)) };
+    return { source: ref.source, order: type, show, episodes, seasons: seasons.filter(s => withEpisodes.has(s.number)) };
   }
 
   private async showMeta(b: Bundle, ctx: TvContext): Promise<ProviderMetadata> {
@@ -326,12 +371,13 @@ export class TvProvider {
       year: show.year ?? yearOf(show.firstAired),
       summary,
       Guid: externalIds.map(id => ({ id })),
+      SeasonType: b.source === 'tvdb' ? seasonTypes(show) : undefined,
     });
   }
 
   private async seasonMeta(b: Bundle, season: ShowSeason, ctx: TvContext): Promise<ProviderMetadata> {
     const { show } = b;
-    const ratingKey = seasonKey(b.source, show.id, season.number);
+    const ratingKey = seasonKey(b, season.number);
     const showRatingKey = showKey(b.source, show.id);
     const first = b.episodes.find(e => e.seasonNumber === season.number && e.aired)?.aired;
     // TMDB returns season overviews with the show. TVDB only lists the ones it has; skip the
@@ -367,7 +413,7 @@ export class TvProvider {
   private async episodeMeta(b: Bundle, e: Episode, ctx: TvContext): Promise<ProviderMetadata> {
     const { show } = b;
     const ratingKey = episodeKey(b, e);
-    const sKey = seasonKey(b.source, show.id, e.seasonNumber);
+    const sKey = seasonKey(b, e.seasonNumber);
     const showRatingKey = showKey(b.source, show.id);
     const summary = await this.summary('episode', show.title, cleanSummary(e.overview), [`${b.source}://${e.id}`], ctx, [b.source]);
     return compact({

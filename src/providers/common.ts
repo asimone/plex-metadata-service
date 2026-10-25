@@ -36,6 +36,8 @@ export interface ProviderMetadata {
   grandparentGuid?: string;
   grandparentTitle?: string;
   Guid?: Array<{ id: string }>;
+  /** Episode orderings a TV show offers (Plex's "Episode ordering" setting). */
+  SeasonType?: Array<{ id: string; source: string; tag: string; title: string }>;
   Children?: { size: number; Metadata: ProviderMetadata[] };
 }
 
